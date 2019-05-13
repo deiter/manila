@@ -246,8 +246,8 @@ class NexentaNasDriver(driver.ShareDriver):
 
     def _get_snapshot_path(self, snapshot):
         """Return ZFS snapshot path for the snapshot."""
-        snapshot_id = (
-            snapshot['snapshot_id'] or snapshot['share_group_snapshot_id'])
+        snapshot_id = (snapshot.get('snapshot_id') or
+                       snapshot.get('share_group_snapshot_id'))
         share = snapshot.get('share') or snapshot.get('share_instance')
         fs_path = self._get_dataset_path(share)
         return '%s@snapshot-%s' % (fs_path, snapshot_id)
@@ -320,7 +320,7 @@ class NexentaNasDriver(driver.ShareDriver):
         self.nef.snapshots.delete(snapshot_path, payload)
 
     def revert_to_snapshot(self, context, snapshot, share_access_rules,
-                           snapshot_access_rules, share_server=None):
+                           share_server=None):
         """Reverts a share (in place) to the specified snapshot.
 
         Does not delete the share snapshot.  The share and snapshot must both
@@ -336,8 +336,6 @@ class NexentaNasDriver(driver.ShareDriver):
         :param snapshot: The snapshot to be restored
         :param share_access_rules: List of all access rules for the affected
             share
-        :param snapshot_access_rules: List of all access rules for the affected
-            snapshot
         :param share_server: Optional -- Share server model or None
         """
         snapshot_path = self._get_snapshot_path(snapshot).split('@')[1]
