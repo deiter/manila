@@ -246,8 +246,8 @@ class NexentaNasDriver(driver.ShareDriver):
 
     def _get_snapshot_path(self, snapshot):
         """Return ZFS snapshot path for the snapshot."""
-        snapshot_id = (
-            snapshot['snapshot_id'] or snapshot['share_group_snapshot_id'])
+        snapshot_id = (snapshot.get('snapshot_id') or
+                       snapshot.get('share_group_snapshot_id'))
         share = snapshot.get('share') or snapshot.get('share_instance')
         fs_path = self._get_dataset_path(share)
         return '%s@snapshot-%s' % (fs_path, snapshot_id)
@@ -318,33 +318,6 @@ class NexentaNasDriver(driver.ShareDriver):
         LOG.debug('Deleting snapshot: %s.', snapshot_path)
         payload = {'defer': True}
         self.nef.snapshots.delete(snapshot_path, payload)
-
-    def revert_to_snapshot(self, context, snapshot, share_access_rules,
-                           snapshot_access_rules, share_server=None):
-        """Reverts a share (in place) to the specified snapshot.
-
-        Does not delete the share snapshot.  The share and snapshot must both
-        be 'available' for the restore to be attempted.  The snapshot must be
-        the most recent one taken by Manila; the API layer performs this check
-        so the driver doesn't have to.
-
-        The share must be reverted in place to the contents of the snapshot.
-        Application admins should quiesce or otherwise prepare the application
-        for the shared file system contents to change suddenly.
-
-        :param context: Current context
-        :param snapshot: The snapshot to be restored
-        :param share_access_rules: List of all access rules for the affected
-            share
-        :param snapshot_access_rules: List of all access rules for the affected
-            snapshot
-        :param share_server: Optional -- Share server model or None
-        """
-        snapshot_path = self._get_snapshot_path(snapshot).split('@')[1]
-        LOG.debug('Reverting to snapshot: %s.', snapshot_path)
-        share_path = self._get_dataset_path(snapshot['share'])
-        payload = {'snapshot': snapshot_path}
-        self.nef.filesystems.rollback(share_path, payload)
 
     def manage_existing(self, share, driver_options):
         """Brings an existing share under Manila management.
@@ -539,7 +512,6 @@ class NexentaNasDriver(driver.ShareDriver):
             'driver_version': VERSION,
             'snapshot_support': True,
             'create_share_from_snapshot_support': True,
-            'revert_to_snapshot_support': True,
             'pools': [{
                 'pool_name': self.pool_name,
                 'compression': compression,
