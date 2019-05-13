@@ -36,7 +36,7 @@ class SharesNFSTest(base.BaseSharesTest):
             raise cls.skipException(message)
         cls.share = cls.create_share(cls.protocol)
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     def test_create_get_delete_share(self):
 
         share = self.create_share(self.protocol)
@@ -57,8 +57,10 @@ class SharesNFSTest(base.BaseSharesTest):
         self.assertFalse(share['is_public'])
 
         # The 'status' of the share returned by the create API must be
-        # the default value - 'creating'.
-        self.assertEqual('creating', share['status'])
+        # set and have value either 'creating' or
+        # 'available' (if share creation is really fast as in
+        # case of Dummy driver).
+        self.assertIn(share['status'], ('creating', 'available'))
 
         # Get share using v 2.1 - we expect key 'snapshot_support' to be absent
         share_get = self.shares_v2_client.get_share(share['id'], version='2.1')
@@ -84,6 +86,12 @@ class SharesNFSTest(base.BaseSharesTest):
             detailed_elements.add('replication_type')
             self.assertTrue(detailed_elements.issubset(share.keys()), msg)
 
+        # In v 2.16 and beyond, we add user_id in show/create/manage
+        # share echo.
+        if utils.is_microversion_supported('2.16'):
+            detailed_elements.add('user_id')
+            self.assertTrue(detailed_elements.issubset(share.keys()), msg)
+
         # Delete share
         self.shares_v2_client.delete_share(share['id'])
         self.shares_v2_client.wait_for_resource_deletion(share_id=share['id'])
@@ -91,21 +99,33 @@ class SharesNFSTest(base.BaseSharesTest):
                           self.shares_v2_client.get_share,
                           share['id'])
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @testtools.skipUnless(CONF.share.run_snapshot_tests,
                           "Snapshot tests are disabled.")
     def test_create_delete_snapshot(self):
 
         # create snapshot
         snap = self.create_snapshot_wait_for_active(self.share["id"])
+
         detailed_elements = {'name', 'id', 'description',
                              'created_at', 'share_proto', 'size', 'share_size',
                              'share_id', 'status', 'links'}
-        self.assertTrue(detailed_elements.issubset(snap.keys()),
-                        'At least one expected element missing from snapshot '
-                        'response. Expected %(expected)s, got %(actual)s.' % {
-                            "expected": detailed_elements,
-                            "actual": snap.keys()})
+        msg = (
+            "At least one expected element missing from share "
+            "response. Expected %(expected)s, got %(actual)s." % {
+                "expected": detailed_elements,
+                "actual": snap.keys(),
+            }
+        )
+        self.assertTrue(detailed_elements.issubset(snap.keys()), msg)
+
+        # In v2.17 and beyond, we expect user_id and project_id keys
+        if utils.is_microversion_supported('2.17'):
+            detailed_elements.update({'user_id', 'project_id'})
+            self.assertTrue(detailed_elements.issubset(snap.keys()), msg)
+        else:
+            self.assertNotIn('user_id', detailed_elements)
+            self.assertNotIn('project_id', detailed_elements)
 
         # delete snapshot
         self.shares_client.delete_snapshot(snap["id"])
@@ -113,7 +133,7 @@ class SharesNFSTest(base.BaseSharesTest):
         self.assertRaises(lib_exc.NotFound,
                           self.shares_client.get_snapshot, snap['id'])
 
-    @test.attr(type=["gate", "smoke", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @testtools.skipUnless(CONF.share.run_snapshot_tests,
                           "Snapshot tests are disabled.")
     def test_create_share_from_snapshot(self):
@@ -128,8 +148,10 @@ class SharesNFSTest(base.BaseSharesTest):
             self.protocol, snapshot_id=snap["id"], cleanup_in_class=False)
 
         # The 'status' of the share returned by the create API must be
-        # the default value - 'creating'.
-        self.assertEqual('creating', s2['status'])
+        # set and have value either 'creating' or
+        # 'available' (if share creation is really fast as in
+        # case of Dummy driver).
+        self.assertIn(s2['status'], ('creating', 'available'))
 
         # verify share, created from snapshot
         get = self.shares_client.get_share(s2["id"])
@@ -137,7 +159,7 @@ class SharesNFSTest(base.BaseSharesTest):
               "source of share %s" % (snap["id"], get["snapshot_id"])
         self.assertEqual(get["snapshot_id"], snap["id"], msg)
 
-    @test.attr(type=["gate", "smoke", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @testtools.skipIf(not CONF.share.multitenancy_enabled,
                       "Only for multitenancy.")
     @testtools.skipUnless(CONF.share.run_snapshot_tests,
@@ -158,8 +180,10 @@ class SharesNFSTest(base.BaseSharesTest):
             self.protocol, snapshot_id=snap["id"], cleanup_in_class=False)
 
         # The 'status' of the share returned by the create API must be
-        # the default value - 'creating'.
-        self.assertEqual('creating', child['status'])
+        # set and have value either 'creating' or
+        # 'available' (if share creation is really fast as in
+        # case of Dummy driver).
+        self.assertIn(child['status'], ('creating', 'available'))
 
         # verify share, created from snapshot
         get = self.shares_client.get_share(child["id"])

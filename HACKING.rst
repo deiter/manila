@@ -9,9 +9,12 @@ Manila Style Commandments
 Manila Specific Commandments
 ----------------------------
 
+- [M310] Check for improper use of logging format arguments.
+- [M312] Use assertIsNone(...) instead of assertEqual(None, ...).
+- [M313] Use assertTrue(...) rather than assertEqual(True, ...).
 - [M319] Validate that debug level logs are not translated.
 - [M323] Ensure that the _() function is explicitly imported to ensure proper translations.
-- [M325] str() cannot be used on an exception.  Remove use or use six.text_type()
+- [M325] str() and unicode() cannot be used on an exception. Remove or use six.text_type().
 - [M326] Translated messages cannot be concatenated.  String should be
   included in translated message.
 - [M328] LOG.critical messages require translations _LC()!
@@ -59,21 +62,6 @@ without the patch and passes with the patch.
 
 For more information on creating unit tests and utilizing the testing
 infrastructure in OpenStack Manila, please read manila/testing/README.rst.
-
-
-openstack-common
-----------------
-
-A number of modules from openstack-common are imported into the project.
-
-These modules are "incubating" in openstack-common and are kept in sync
-with the help of openstack-common's update.py script. See:
-
-  http://wiki.openstack.org/CommonLibrary#Incubation
-
-The copy of the code should never be directly modified here. Please
-always update openstack-common first and then run the script to copy
-the changes across.
 
 
 Running Tests

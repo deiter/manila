@@ -18,6 +18,8 @@
 """Testing of SQLAlchemy backend."""
 
 import ddt
+import mock
+
 from oslo_db import exception as db_exception
 from oslo_utils import uuidutils
 import six
@@ -120,6 +122,17 @@ class ShareAccessDatabaseAPITestCase(test.TestCase):
             "fake_status"
         )
 
+    @ddt.data(None, 'rhubarb')
+    def test_share_access_update_access_key(self, key_value):
+        share = db_utils.create_share()
+        access = db_utils.create_access(share_id=share['id'])
+
+        db_api.share_access_update_access_key(self.ctxt, access['id'],
+                                              key_value)
+
+        access = db_api.share_access_get(self.ctxt, access['id'])
+        self.assertEqual(key_value, access['access_key'])
+
 
 @ddt.ddt
 class ShareDatabaseAPITestCase(test.TestCase):
@@ -192,6 +205,32 @@ class ShareDatabaseAPITestCase(test.TestCase):
         instance = db_api.share_instance_get(self.ctxt, share.instance['id'])
 
         self.assertEqual('share-%s' % instance['id'], instance['name'])
+
+    @ddt.data(True, False)
+    def test_share_instance_get_all_by_host(self, with_share_data):
+        db_utils.create_share()
+        instances = db_api.share_instances_get_all_by_host(
+            self.ctxt, 'fake_host', with_share_data)
+
+        self.assertEqual(1, len(instances))
+        instance = instances[0]
+
+        self.assertEqual('share-%s' % instance['id'], instance['name'])
+
+        if with_share_data:
+            self.assertEqual('NFS', instance['share_proto'])
+            self.assertEqual(0, instance['size'])
+        else:
+            self.assertNotIn('share_proto', instance)
+
+    def test_share_instance_get_all_by_host_not_found_exception(self):
+        db_utils.create_share()
+        self.mock_object(db_api, 'share_get', mock.Mock(
+                         side_effect=exception.NotFound))
+        instances = db_api.share_instances_get_all_by_host(
+            self.ctxt, 'fake_host', True)
+
+        self.assertEqual(0, len(instances))
 
     def test_share_instance_get_all_by_consistency_group(self):
         cg = db_utils.create_consistency_group()
@@ -398,53 +437,6 @@ class ShareDatabaseAPITestCase(test.TestCase):
                 expected_share_keys.issubset(replica_share_2.keys()))
             self.assertIsNone(replica_share_3)
 
-    def test_share_replicas_get_active_replicas_by_share(self):
-        db_utils.create_share_replica(
-            id='Replica1',
-            share_id='FAKE_SHARE_ID1',
-            status=constants.STATUS_AVAILABLE,
-            replica_state=constants.REPLICA_STATE_ACTIVE)
-        db_utils.create_share_replica(
-            id='Replica2',
-            status=constants.STATUS_AVAILABLE,
-            share_id='FAKE_SHARE_ID1',
-            replica_state=constants.REPLICA_STATE_ACTIVE)
-        db_utils.create_share_replica(
-            id='Replica3',
-            status=constants.STATUS_AVAILABLE,
-            share_id='FAKE_SHARE_ID2',
-            replica_state=constants.REPLICA_STATE_ACTIVE)
-        db_utils.create_share_replica(
-            id='Replica4',
-            status=constants.STATUS_ERROR,
-            share_id='FAKE_SHARE_ID2',
-            replica_state=constants.REPLICA_STATE_ACTIVE)
-        db_utils.create_share_replica(
-            id='Replica5',
-            status=constants.STATUS_AVAILABLE,
-            share_id='FAKE_SHARE_ID2',
-            replica_state=constants.REPLICA_STATE_IN_SYNC)
-        db_utils.create_share_replica(
-            id='Replica6',
-            share_id='FAKE_SHARE_ID3',
-            status=constants.STATUS_AVAILABLE,
-            replica_state=constants.REPLICA_STATE_IN_SYNC)
-
-        def get_active_replica_ids(share_id):
-            active_replicas = (
-                db_api.share_replicas_get_active_replicas_by_share(
-                    self.ctxt, share_id)
-            )
-            return [r['id'] for r in active_replicas]
-
-        active_ids_shr1 = get_active_replica_ids('FAKE_SHARE_ID1')
-        active_ids_shr2 = get_active_replica_ids('FAKE_SHARE_ID2')
-        active_ids_shr3 = get_active_replica_ids('FAKE_SHARE_ID3')
-
-        self.assertEqual(active_ids_shr1, ['Replica1', 'Replica2'])
-        self.assertEqual(active_ids_shr2, ['Replica3', 'Replica4'])
-        self.assertEqual([], active_ids_shr3)
-
     def test_share_replica_get_exception(self):
         replica = db_utils.create_share_replica(share_id='FAKE_SHARE_ID')
 
@@ -607,34 +599,6 @@ class ConsistencyGroupDatabaseAPITestCase(test.TestCase):
         self.assertEqual(1, len(cgs))
         cg = cgs[0]
         self.assertDictMatch(dict(expected_cg), dict(cg))
-
-    def test_consistency_group_get_all_by_host(self):
-        fake_host = 'my_fake_host'
-        expected_cg = db_utils.create_consistency_group(host=fake_host)
-        db_utils.create_consistency_group()
-
-        cgs = db_api.consistency_group_get_all_by_host(self.ctxt, fake_host,
-                                                       detailed=False)
-
-        self.assertEqual(1, len(cgs))
-        cg = cgs[0]
-        self.assertEqual(2, len(dict(cg).keys()))
-        self.assertEqual(expected_cg['id'], cg['id'])
-        self.assertEqual(expected_cg['name'], cg['name'])
-
-    def test_consistency_group_get_all_by_host_with_details(self):
-        fake_host = 'my_fake_host'
-        expected_cg = db_utils.create_consistency_group(host=fake_host)
-        db_utils.create_consistency_group()
-
-        cgs = db_api.consistency_group_get_all_by_host(self.ctxt,
-                                                       fake_host,
-                                                       detailed=True)
-
-        self.assertEqual(1, len(cgs))
-        cg = cgs[0]
-        self.assertDictMatch(dict(expected_cg), dict(cg))
-        self.assertEqual(fake_host, cg['host'])
 
     def test_consistency_group_get_all_by_project(self):
         fake_project = 'fake_project'
@@ -1044,14 +1008,6 @@ class ShareSnapshotDatabaseAPITestCase(test.TestCase):
             self.assertEqual(1, len(snapshot['instances']))
             self.assertEqual(first_instance_id, snapshot['instance']['id'])
 
-    def test_share_snapshot_destroy_has_instances(self):
-        snapshot = db_utils.create_snapshot(with_share=True)
-
-        self.assertRaises(exception.InvalidShareSnapshot,
-                          db_api.share_snapshot_destroy,
-                          context.get_admin_context(),
-                          snapshot['id'])
-
 
 class ShareExportLocationsDatabaseAPITestCase(test.TestCase):
 
@@ -1278,7 +1234,7 @@ class DriverPrivateDataDatabaseAPITestCase(test.TestCase):
         self.ctxt = context.get_admin_context()
 
     def _get_driver_test_data(self):
-        return ("fake@host", uuidutils.generate_uuid())
+        return uuidutils.generate_uuid()
 
     @ddt.data({"details": {"foo": "bar", "tee": "too"},
                "valid": {"foo": "bar", "tee": "too"}},
@@ -1286,93 +1242,83 @@ class DriverPrivateDataDatabaseAPITestCase(test.TestCase):
                "valid": {"foo": "bar", "tee": six.text_type(["test"])}})
     @ddt.unpack
     def test_update(self, details, valid):
-        test_host, test_id = self._get_driver_test_data()
+        test_id = self._get_driver_test_data()
 
-        initial_data = db_api.driver_private_data_get(
-            self.ctxt, test_host, test_id)
-        db_api.driver_private_data_update(self.ctxt, test_host, test_id,
-                                          details)
-        actual_data = db_api.driver_private_data_get(
-            self.ctxt, test_host, test_id)
+        initial_data = db_api.driver_private_data_get(self.ctxt, test_id)
+        db_api.driver_private_data_update(self.ctxt, test_id, details)
+        actual_data = db_api.driver_private_data_get(self.ctxt, test_id)
 
         self.assertEqual({}, initial_data)
         self.assertEqual(valid, actual_data)
 
     def test_update_with_duplicate(self):
-        test_host, test_id = self._get_driver_test_data()
+        test_id = self._get_driver_test_data()
         details = {"tee": "too"}
 
-        db_api.driver_private_data_update(self.ctxt, test_host, test_id,
-                                          details)
-        db_api.driver_private_data_update(self.ctxt, test_host, test_id,
-                                          details)
+        db_api.driver_private_data_update(self.ctxt, test_id, details)
+        db_api.driver_private_data_update(self.ctxt, test_id, details)
 
-        actual_result = db_api.driver_private_data_get(
-            self.ctxt, test_host, test_id)
+        actual_result = db_api.driver_private_data_get(self.ctxt,
+                                                       test_id)
 
         self.assertEqual(details, actual_result)
 
     def test_update_with_delete_existing(self):
-        test_host, test_id = self._get_driver_test_data()
+        test_id = self._get_driver_test_data()
         details = {"key1": "val1", "key2": "val2", "key3": "val3"}
         details_update = {"key1": "val1_upd", "key4": "new_val"}
 
         # Create new details
-        db_api.driver_private_data_update(self.ctxt, test_host, test_id,
-                                          details)
-        db_api.driver_private_data_update(self.ctxt, test_host, test_id,
+        db_api.driver_private_data_update(self.ctxt, test_id, details)
+        db_api.driver_private_data_update(self.ctxt, test_id,
                                           details_update, delete_existing=True)
 
         actual_result = db_api.driver_private_data_get(
-            self.ctxt, test_host, test_id)
+            self.ctxt, test_id)
 
         self.assertEqual(details_update, actual_result)
 
     def test_get(self):
-        test_host, test_id = self._get_driver_test_data()
+        test_id = self._get_driver_test_data()
         test_key = "foo"
         test_keys = [test_key, "tee"]
         details = {test_keys[0]: "val", test_keys[1]: "val", "mee": "foo"}
-        db_api.driver_private_data_update(self.ctxt, test_host, test_id,
-                                          details)
+        db_api.driver_private_data_update(self.ctxt, test_id, details)
 
         actual_result_all = db_api.driver_private_data_get(
-            self.ctxt, test_host, test_id)
+            self.ctxt, test_id)
         actual_result_single_key = db_api.driver_private_data_get(
-            self.ctxt, test_host, test_id, test_key)
+            self.ctxt, test_id, test_key)
         actual_result_list = db_api.driver_private_data_get(
-            self.ctxt, test_host, test_id, test_keys)
+            self.ctxt, test_id, test_keys)
 
         self.assertEqual(details, actual_result_all)
         self.assertEqual(details[test_key], actual_result_single_key)
         self.assertEqual(dict.fromkeys(test_keys, "val"), actual_result_list)
 
     def test_delete_single(self):
-        test_host, test_id = self._get_driver_test_data()
+        test_id = self._get_driver_test_data()
         test_key = "foo"
         details = {test_key: "bar", "tee": "too"}
         valid_result = {"tee": "too"}
-        db_api.driver_private_data_update(self.ctxt, test_host, test_id,
-                                          details)
+        db_api.driver_private_data_update(self.ctxt, test_id, details)
 
-        db_api.driver_private_data_delete(self.ctxt, test_host, test_id,
-                                          test_key)
+        db_api.driver_private_data_delete(self.ctxt, test_id, test_key)
 
         actual_result = db_api.driver_private_data_get(
-            self.ctxt, test_host, test_id)
+            self.ctxt, test_id)
 
         self.assertEqual(valid_result, actual_result)
 
     def test_delete_all(self):
-        test_host, test_id = self._get_driver_test_data()
+        test_id = self._get_driver_test_data()
         details = {"foo": "bar", "tee": "too"}
-        db_api.driver_private_data_update(self.ctxt, test_host, test_id,
-                                          details)
+        db_api.driver_private_data_update(self.ctxt, test_id, details)
 
-        db_api.driver_private_data_delete(self.ctxt, test_host, test_id)
+        db_api.driver_private_data_delete(self.ctxt, test_id)
 
         actual_result = db_api.driver_private_data_get(
-            self.ctxt, test_host, test_id)
+            self.ctxt, test_id)
 
         self.assertEqual({}, actual_result)
 
@@ -2094,10 +2040,10 @@ class AvailabilityZonesDatabaseAPITestCase(test.TestCase):
 
     @ddt.data({'fake': 'fake'}, {}, {'fakeavailability_zone': 'fake'},
               {'availability_zone': None}, {'availability_zone': ''})
-    def test_ensure_availability_zone_exists_invalid(self, test_values):
+    def test__ensure_availability_zone_exists_invalid(self, test_values):
         session = db_api.get_session()
 
-        self.assertRaises(ValueError, db_api.ensure_availability_zone_exists,
+        self.assertRaises(ValueError, db_api._ensure_availability_zone_exists,
                           self.ctxt, test_values, session)
 
     def test_az_get(self):

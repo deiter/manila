@@ -42,7 +42,7 @@ class ConsistencyGroupsTest(base.BaseSharesAdminTest):
         share_type = cls.create_share_type(name, extra_specs=extra_specs)
         cls.share_type2 = share_type['share_type']
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_API_WITH_BACKEND])
     def test_create_cg_with_multiple_share_types_v2_4(self):
         # Create a consistency group
         consistency_group = self.create_consistency_group(
@@ -66,3 +66,34 @@ class ConsistencyGroupsTest(base.BaseSharesAdminTest):
                          '%s. Expected %s, got %s' % (consistency_group['id'],
                                                       expected_share_types,
                                                       actual_share_types))
+
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_API_WITH_BACKEND])
+    @testtools.skipIf(
+        not CONF.share.multitenancy_enabled, "Only for multitenancy.")
+    def test_create_cg_from_cgsnapshot_verify_share_server_information(self):
+        # Create a consistency group
+        orig_consistency_group = self.create_consistency_group(
+            cleanup_in_class=False,
+            share_type_ids=[self.share_type['id']],
+            version='2.4')
+
+        # Get latest CG information
+        orig_consistency_group = self.shares_v2_client.get_consistency_group(
+            orig_consistency_group['id'], version='2.4')
+
+        # Assert share server information
+        self.assertIsNotNone(orig_consistency_group['share_network_id'])
+        self.assertIsNotNone(orig_consistency_group['share_server_id'])
+
+        cg_snapshot = self.create_cgsnapshot_wait_for_active(
+            orig_consistency_group['id'], cleanup_in_class=False,
+            version='2.4')
+        new_consistency_group = self.create_consistency_group(
+            cleanup_in_class=False, version='2.4',
+            source_cgsnapshot_id=cg_snapshot['id'])
+
+        # Assert share server information
+        self.assertEqual(orig_consistency_group['share_network_id'],
+                         new_consistency_group['share_network_id'])
+        self.assertEqual(orig_consistency_group['share_server_id'],
+                         new_consistency_group['share_server_id'])

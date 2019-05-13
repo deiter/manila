@@ -18,6 +18,7 @@ Drivers for shares.
 
 """
 
+import six
 import time
 
 from oslo_config import cfg
@@ -77,7 +78,7 @@ share_opts = [
              "Items should be names (not including any path)."),
     cfg.StrOpt(
         'share_mount_template',
-        default='mount -vt %(proto)s %(export)s %(path)s',
+        default='mount -vt %(proto)s %(options)s %(export)s %(path)s',
         help="The template for mounting shares for this backend. Must specify "
              "the executable with all necessary parameters for the protocol "
              "supported. 'proto' template element may not be required if "
@@ -91,6 +92,16 @@ share_opts = [
              "specify the executable with all necessary parameters for the "
              "protocol supported. 'path' template element is required. It is "
              "advisable to separate different commands per backend."),
+    cfg.DictOpt(
+        'protocol_access_mapping',
+        default={
+            'ip': ['nfs'],
+            'user': ['cifs'],
+        },
+        help="Protocol access mapping for this backend. Should be a "
+             "dictionary comprised of "
+             "{'access_type1': ['share_proto1', 'share_proto2'],"
+             " 'access_type2': ['share_proto2', 'share_proto3']}."),
     cfg.BoolOpt(
         'migration_readonly_rules_support',
         default=True,
@@ -106,13 +117,20 @@ share_opts = [
     # Replication option/s
     cfg.StrOpt(
         "replication_domain",
-        default=None,
         help="A string specifying the replication domain that the backend "
              "belongs to. This option needs to be specified the same in the "
              "configuration sections of all backends that support "
              "replication between each other. If this option is not "
              "specified in the group, it means that replication is not "
              "enabled on the backend."),
+    cfg.StrOpt('filter_function',
+               default=None,
+               help='String representation for an equation that will be '
+                    'used to filter hosts.'),
+    cfg.StrOpt('goodness_function',
+               default=None,
+               help='String representation for an equation that will be '
+                    'used to determine the goodness of a host.'),
 ]
 
 ssh_opts = [
@@ -309,84 +327,160 @@ class ShareDriver(object):
                 {'actual': self.driver_handles_share_servers,
                  'allowed': driver_handles_share_servers})
 
-    def migration_start(self, context, share_ref, share_server, host,
-                        dest_driver_migration_info, notify):
-        """Is called to perform 1st phase of driver migration of a given share.
+    def migration_check_compatibility(
+            self, context, source_share, destination_share,
+            share_server=None, destination_share_server=None):
+        """Checks destination compatibility for migration of a given share.
+
+        .. note::
+            Is called to test compatibility with destination backend.
+
+        Driver should check if it is compatible with destination backend so
+        driver-assisted migration can proceed.
+
+        :param context: The 'context.RequestContext' object for the request.
+        :param source_share: Reference to the share to be migrated.
+        :param destination_share: Reference to the share model to be used by
+            migrated share.
+        :param share_server: Share server model or None.
+        :param destination_share_server: Destination Share server model or
+            None.
+        :return: A dictionary containing values indicating if destination
+            backend is compatible, if share can remain writable during
+            migration, if it can preserve all file metadata and if it can
+            perform migration of given share non-disruptively.
+
+            Example::
+
+            {
+                'compatible': True,
+                'writable': True,
+                'preserve_metadata': True,
+                'nondisruptive': True,
+            }
+        """
+        return {
+            'compatible': False,
+            'writable': False,
+            'preserve_metadata': False,
+            'nondisruptive': False,
+        }
+
+    def migration_start(
+            self, context, source_share, destination_share,
+            share_server=None, destination_share_server=None):
+        """Starts migration of a given share to another host.
+
+        .. note::
+           Is called in source share's backend to start migration.
 
         Driver should implement this method if willing to perform migration
-        in an optimized way, useful for when driver understands destination
-        backend.
+        in a driver-assisted way, useful for when source share's backend driver
+        is compatible with destination backend driver. This method should
+        start the migration procedure in the backend and end. Following steps
+        should be done in 'migration_continue'.
+
         :param context: The 'context.RequestContext' object for the request.
-        :param share_ref: Reference to the share being migrated.
+        :param source_share: Reference to the original share model.
+        :param destination_share: Reference to the share model to be used by
+            migrated share.
         :param share_server: Share server model or None.
-        :param host: Destination host and its capabilities.
-        :param dest_driver_migration_info: Migration information provided by
-        destination host.
-        :param notify: whether the migration should complete or wait for
-        2nd phase call. Driver may throw exception when validating this
-        parameter, exception if does not support 1-phase or 2-phase approach.
-        :returns: Boolean value indicating if driver migration succeeded.
-        :returns: Dictionary containing a model update.
-        """
-        return None, None
-
-    def migration_complete(self, context, share_ref, share_server,
-                           dest_driver_migration_info):
-        """Is called to perform 2nd phase of driver migration of a given share.
-
-        If driver is implementing 2-phase migration, this method should
-        perform tasks related to the 2nd phase of migration, thus completing
-        it.
-        :param context: The 'context.RequestContext' object for the request.
-        :param share_ref: Reference to the share being migrated.
-        :param share_server: Share server model or None.
-        :param dest_driver_migration_info: Migration information provided by
-        destination host.
-        :returns: Dictionary containing a model update.
-        """
-        return None
-
-    def migration_cancel(self, context, share_ref, share_server,
-                         dest_driver_migration_info):
-        """Is called to cancel driver migration.
-
-        If possible, driver can implement a way to cancel an in-progress
-        migration.
-        :param context: The 'context.RequestContext' object for the request.
-        :param share_ref: Reference to the share being migrated.
-        :param share_server: Share server model or None.
-        :param dest_driver_migration_info: Migration information provided by
-        destination host.
+        :param destination_share_server: Destination Share server model or
+            None.
         """
         raise NotImplementedError()
 
-    def migration_get_progress(self, context, share_ref, share_server,
-                               dest_driver_migration_info):
-        """Is called to get migration progress.
+    def migration_continue(
+            self, context, source_share, destination_share,
+            share_server=None, destination_share_server=None):
+        """Continues migration of a given share to another host.
+
+        .. note::
+            Is called in source share's backend to continue migration.
+
+        Driver should implement this method to continue monitor the migration
+        progress in storage and perform following steps until 1st phase is
+        completed.
+
+        :param context: The 'context.RequestContext' object for the request.
+        :param source_share: Reference to the original share model.
+        :param destination_share: Reference to the share model to be used by
+            migrated share.
+        :param share_server: Share server model or None.
+        :param destination_share_server: Destination Share server model or
+            None.
+        :return: Boolean value to indicate if 1st phase is finished.
+        """
+        raise NotImplementedError()
+
+    def migration_complete(
+            self, context, source_share, destination_share,
+            share_server=None, destination_share_server=None):
+        """Completes migration of a given share to another host.
+
+        .. note::
+            Is called in source share's backend to complete migration.
+
+        If driver is implementing 2-phase migration, this method should
+        perform the disruptive tasks related to the 2nd phase of migration,
+        thus completing it. Driver should also delete all original share data
+        from source backend.
+
+        :param context: The 'context.RequestContext' object for the request.
+        :param source_share: Reference to the original share model.
+        :param destination_share: Reference to the share model to be used by
+            migrated share.
+        :param share_server: Share server model or None.
+        :param destination_share_server: Destination Share server model or
+            None.
+        :return: List of export locations to update the share with.
+        """
+        raise NotImplementedError()
+
+    def migration_cancel(
+            self, context, source_share, destination_share,
+            share_server=None, destination_share_server=None):
+        """Cancels migration of a given share to another host.
+
+        .. note::
+           Is called in source share's backend to cancel migration.
+
+        If possible, driver can implement a way to cancel an in-progress
+        migration.
+
+        :param context: The 'context.RequestContext' object for the request.
+        :param source_share: Reference to the original share model.
+        :param destination_share: Reference to the share model to be used by
+            migrated share.
+        :param share_server: Share server model or None.
+        :param destination_share_server: Destination Share server model or
+            None.
+        """
+        raise NotImplementedError()
+
+    def migration_get_progress(
+            self, context, source_share, destination_share,
+            share_server=None, destination_share_server=None):
+        """Obtains progress of migration of a given share to another host.
+
+        .. note::
+            Is called in source share's backend to obtain migration progress.
 
         If possible, driver can implement a way to return migration progress
         information.
         :param context: The 'context.RequestContext' object for the request.
-        :param share_ref: Reference to the share being migrated.
+        :param source_share: Reference to the original share model.
+        :param destination_share: Reference to the share model to be used by
+            migrated share.
         :param share_server: Share server model or None.
-        :param dest_driver_migration_info: Migration information provided by
-        destination host.
-        :return: A dictionary with 'total_progress' field containing the
-        percentage value.
+        :param destination_share_server: Destination Share server model or
+            None.
+        :return: A dictionary with at least 'total_progress' field containing
+            the percentage value.
         """
         raise NotImplementedError()
 
-    def migration_get_driver_info(self, context, share, share_server):
-        """Is called to provide necessary driver migration logic.
-
-        :param context: The 'context.RequestContext' object for the request.
-        :param share: Reference to the share being migrated.
-        :param share_server: Share server model or None.
-        :return: A dictionary with migration information.
-        """
-        return None
-
-    def migration_get_info(self, context, share, share_server):
+    def connection_get_info(self, context, share, share_server=None):
         """Is called to provide necessary generic migration logic.
 
         :param context: The 'context.RequestContext' object for the request.
@@ -399,23 +493,47 @@ class ShareDriver(object):
         unmount_template = self._get_unmount_command(context, share,
                                                      share_server)
 
-        return {'mount': mount_template,
-                'unmount': unmount_template}
+        access_mapping = self._get_access_mapping(context, share, share_server)
 
-    def _get_mount_command(self, context, share_instance, share_server):
+        info = {
+            'mount': mount_template,
+            'unmount': unmount_template,
+            'access_mapping': access_mapping,
+        }
+
+        LOG.debug("Migration info obtained for share %(share_id)s: %(info)s.",
+                  {'share_id': share['id'], 'info': six.text_type(info)})
+
+        return info
+
+    def _get_access_mapping(self, context, share, share_server):
+
+        mapping = self.configuration.safe_get('protocol_access_mapping') or {}
+        result = {}
+        share_proto = share['share_proto'].lower()
+        for access_type, protocols in mapping.items():
+            if share_proto in [y.lower() for y in protocols]:
+                result[access_type] = result.get(access_type, [])
+                result[access_type].append(share_proto)
+        return result
+
+    def _get_mount_command(self, context, share_instance, share_server=None):
         """Is called to delegate mounting share logic."""
 
         mount_template = self.configuration.safe_get('share_mount_template')
 
         mount_export = self._get_mount_export(share_instance, share_server)
 
-        format_template = {'proto': share_instance['share_proto'].lower(),
-                           'export': mount_export,
-                           'path': '%(path)s'}
+        format_template = {
+            'proto': share_instance['share_proto'].lower(),
+            'export': mount_export,
+            'path': '%(path)s',
+            'options': '%(options)s',
+        }
 
         return mount_template % format_template
 
-    def _get_mount_export(self, share_instance, share_server):
+    def _get_mount_export(self, share_instance, share_server=None):
         # NOTE(ganso): If drivers want to override the export_location IP,
         # they can do so using this configuration. This method can also be
         # overridden if necessary.
@@ -425,7 +543,8 @@ class ShareDriver(object):
             path = share_instance['export_locations'][0]['path']
         return path
 
-    def _get_unmount_command(self, context, share_instance, share_server):
+    def _get_unmount_command(self, context, share_instance,
+                             share_server=None):
         return self.configuration.safe_get('share_unmount_template')
 
     def create_share(self, context, share, share_server=None):
@@ -512,8 +631,8 @@ class ShareDriver(object):
         may be added by the driver instead of R/W. Note that raising an
         exception *will* result in the access_rules_status on the replica,
         and the share itself being "out_of_sync". Drivers can sync on the
-        valid access rules that are provided on the create_replica and
-        promote_replica calls.
+        valid access rules that are provided on the ``create_replica`` and
+        ``promote_replica`` calls.
 
         :param context: Current context
         :param share: Share model with share data.
@@ -523,6 +642,14 @@ class ShareDriver(object):
         :param delete_rules: Empty List or List of access rules which should be
                removed. access_rules doesn't contain these rules.
         :param share_server: None or Share server model
+        :returns: None, or a dictionary of ``access_id``, ``access_key`` as
+                  key: value pairs for the rules added, where, ``access_id``
+                  is the UUID (string) of the access rule, and ``access_key``
+                  is the credential (string) of the entity granted access.
+                  During recovery after error, the returned dictionary must
+                  contain ``access_id``, ``access_key`` for all the rules that
+                  the driver is ordered to resync, i.e. rules in the
+                  ``access_rules`` parameter.
         """
         raise NotImplementedError()
 
@@ -560,6 +687,17 @@ class ShareDriver(object):
 
     def get_admin_network_allocations_number(self):
         return 0
+
+    def update_network_allocation(self, context, share_server):
+        """Update network allocation after share server creation."""
+        self.network_api.update_network_allocation(context, share_server)
+
+    def update_admin_network_allocation(self, context, share_server):
+        """Update admin network allocation after share server creation."""
+        if (self.get_admin_network_allocations_number() and
+                self.admin_network_api):
+            self.admin_network_api.update_network_allocation(context,
+                                                             share_server)
 
     def allocate_network(self, context, share_server, share_network,
                          count=None, **kwargs):
@@ -631,14 +769,20 @@ class ShareDriver(object):
 
         Redefine it within share driver when it is going to handle share
         servers.
+
+        :param metadata: a dictionary, for now containing a key 'request_host'
         """
         raise NotImplementedError()
 
     def manage_existing(self, share, driver_options):
         """Brings an existing share under Manila management.
 
-        If provided share is not valid, then raise a
+        If the provided share is not valid, then raise a
         ManageInvalidShare exception, specifying a reason for the failure.
+
+        If the provided share is not in a state that can be managed, such as
+        being replicated on the backend, the driver *MUST* raise
+        ManageInvalidShare exception with an appropriate message.
 
         The share has a share_type, and the driver can inspect that and
         compare against the properties of the referenced backend share.
@@ -674,14 +818,27 @@ class ShareDriver(object):
         the failure.
 
         :param snapshot: ShareSnapshotInstance model with ShareSnapshot data.
-                         Example:
-                         {'id': <instance id>, 'snapshot_id': < snapshot id>,
-                          'provider_location': <location>, ......}
+
+        Example::
+            {
+            'id': <instance id>,
+            'snapshot_id': < snapshot id>,
+            'provider_location': <location>,
+            ...
+            }
+
         :param driver_options: Optional driver-specific options provided
-                               by admin. Example:
-                               {'key': 'value', ......}
+            by admin.
+
+        Example::
+
+            {
+            'key': 'value',
+            ...
+            }
+
         :return: model_update dictionary with required key 'size',
-                 which should contain size of the share snapshot.
+            which should contain size of the share snapshot.
         """
         raise NotImplementedError()
 
@@ -790,6 +947,8 @@ class ShareDriver(object):
             pools=self.pools or None,
             snapshot_support=self.snapshots_are_supported,
             replication_domain=self.replication_domain,
+            filter_function=self.get_filter_function(),
+            goodness_function=self.get_goodness_function(),
         )
         if isinstance(data, dict):
             common.update(data)
@@ -980,7 +1139,7 @@ class ShareDriver(object):
 
             member_update_list -  a list of dictionaries containing for every
             member of the cgsnapshot. Each dict should contains values to be
-            updated for teh CGSnapshotMember in the database. This list may be
+            updated for the CGSnapshotMember in the database. This list may be
             empty or None.
         """
         raise NotImplementedError()
@@ -1049,15 +1208,16 @@ class ShareDriver(object):
                        access_rules, replica_snapshots, share_server=None):
         """Replicate the active replica to a new replica on this backend.
 
-        NOTE: This call is made on the host that the new replica is
-        being created upon.
+        .. note::
+            This call is made on the host that the new replica is being created
+            upon.
 
         :param context: Current context
         :param replica_list: List of all replicas for a particular share.
-        This list also contains the replica to be created. The 'active'
-        replica will have its 'replica_state' attr set to 'active'.
-            EXAMPLE:
-             .. code::
+            This list also contains the replica to be created. The 'active'
+            replica will have its 'replica_state' attr set to 'active'.
+
+        Example::
 
             [
                 {
@@ -1086,59 +1246,69 @@ class ShareDriver(object):
                 },
                 ...
             ]
+
         :param new_replica: The share replica dictionary.
-            EXAMPLE:
-             .. code::
+
+        Example::
 
             {
-            'id': 'e82ff8b6-65f0-11e5-9d70-feff819cdc9f',
-            'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
-            'deleted': False,
-            'host': 'openstack2@cmodeSSVMNFS2',
-            'status': 'creating',
-            'scheduled_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
-            'launched_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
-            'terminated_at': None,
-            'replica_state': 'out_of_sync',
-            'availability_zone_id': 'f6e146d0-65f0-11e5-9d70-feff819cdc9f',
-            'export_locations': [
-                models.ShareInstanceExportLocations,
-            ],
-            'access_rules_status': 'out_of_sync',
-            'share_network_id': '4ccd5318-65f1-11e5-9d70-feff819cdc9f',
-            'share_server_id': 'e6155221-ea00-49ef-abf9-9f89b7dd900a',
-            'share_server': <models.ShareServer> or None,
+                'id': 'e82ff8b6-65f0-11e5-9d70-feff819cdc9f',
+                'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
+                'deleted': False,
+                'host': 'openstack2@cmodeSSVMNFS2',
+                'status': 'creating',
+                'scheduled_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
+                'launched_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
+                'terminated_at': None,
+                'replica_state': 'out_of_sync',
+                'availability_zone_id': 'f6e146d0-65f0-11e5-9d70-feff819cdc9f',
+                'export_locations': [
+                    models.ShareInstanceExportLocations,
+                ],
+                'access_rules_status': 'out_of_sync',
+                'share_network_id': '4ccd5318-65f1-11e5-9d70-feff819cdc9f',
+                'share_server_id': 'e6155221-ea00-49ef-abf9-9f89b7dd900a',
+                'share_server': <models.ShareServer> or None,
             }
-        :param access_rules: A list of access rules that other instances of
-        the share already obey. Drivers are expected to apply access rules
-        to the new replica or disregard access rules that don't apply.
-            EXAMPLE:
-             .. code::
-             [ {
-             'id': 'f0875f6f-766b-4865-8b41-cccb4cdf1676',
-             'deleted' = False,
-             'share_id' = 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
-             'access_type' = 'ip',
-             'access_to' = '172.16.20.1',
-             'access_level' = 'rw',
-             }]
-        :param replica_snapshots: List of dictionaries of snapshot instances
-        for each snapshot of the share whose 'aggregate_status' property was
-        reported to be 'available' when the share manager initiated this
-        request. Each list member will have two sub dictionaries:
-        'active_replica_snapshot' and 'share_replica_snapshot'. The 'active'
-        replica snapshot corresponds to the instance of the snapshot on any
-        of the 'active' replicas of the share while share_replica_snapshot
-        corresponds to the snapshot instance for the specific replica that
-        will need to exist on the new share replica that is being created.
-        The driver needs to ensure that this snapshot instance is truly
-        available before transitioning the replica from 'out_of_sync' to
-        'in_sync'. Snapshots instances for snapshots that have an
-        'aggregate_status' of 'creating' or 'deleting' will be polled for in
-        the update_replicated_snapshot method.
-            EXAMPLE:
-             .. code::
-             [ {
+
+        :param access_rules: A list of access rules.
+            These are rules that other instances of the share already obey.
+            Drivers are expected to apply access rules to the new replica or
+            disregard access rules that don't apply.
+
+        Example::
+
+             [
+              {
+                 'id': 'f0875f6f-766b-4865-8b41-cccb4cdf1676',
+                 'deleted' = False,
+                 'share_id' = 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
+                 'access_type' = 'ip',
+                 'access_to' = '172.16.20.1',
+                 'access_level' = 'rw',
+              }
+             ]
+
+        :param replica_snapshots: List of dictionaries of snapshot instances.
+            This includes snapshot instances of every snapshot of the share
+            whose 'aggregate_status' property was reported to be 'available'
+            when the share manager initiated this request. Each list member
+            will have two sub dictionaries: 'active_replica_snapshot' and
+            'share_replica_snapshot'. The 'active' replica snapshot corresponds
+            to the instance of the snapshot on any of the 'active' replicas of
+            the share while share_replica_snapshot corresponds to the snapshot
+            instance for the specific replica that will need to exist on the
+            new share replica that is being created. The driver needs to ensure
+            that this snapshot instance is truly available before transitioning
+            the replica from 'out_of_sync' to 'in_sync'. Snapshots instances
+            for snapshots that have an 'aggregate_status' of 'creating' or
+            'deleting' will be polled for in the ``update_replicated_snapshot``
+            method.
+
+        Example::
+
+            [
+             {
              'active_replica_snapshot': {
                 'id': '8bda791c-7bb6-4e7b-9b64-fefff85ff13e',
                 'share_instance_id': '10e49c3e-aca9-483b-8c2d-1c337b38d6af',
@@ -1153,17 +1323,27 @@ class ShareDriver(object):
                 'provider_location': None,
                     ...
                 },
-             }]
-        :param share_server: <models.ShareServer> or None,
-        Share server of the replica being created.
-        :return: None or a dictionary containing export_locations,
-        replica_state and access_rules_status. export_locations is a list of
-        paths and replica_state is one of active, in_sync, out_of_sync or
-        error. A backend supporting 'writable' type replication should return
-        'active' as the replica_state. Export locations should be in the
-        same format as returned during the create_share call.
-            EXAMPLE:
-            .. code::
+             }
+            ]
+
+        :param share_server: <models.ShareServer> or None
+            Share server of the replica being created.
+        :return: None or a dictionary.
+            The dictionary can contain export_locations replica_state and
+            access_rules_status. export_locations is a list of paths and
+            replica_state is one of 'active', 'in_sync', 'out_of_sync' or
+            'error'.
+
+        .. important::
+
+            A backend supporting 'writable' type replication should return
+            'active' as the replica_state.
+
+        Export locations should be in the same format as returned during the
+        ``create_share`` call.
+
+        Example::
+
             {
                 'export_locations': [
                     {
@@ -1175,6 +1355,7 @@ class ShareDriver(object):
                  'replica_state': 'in_sync',
                  'access_rules_status': 'in_sync',
             }
+
         """
         raise NotImplementedError()
 
@@ -1182,15 +1363,16 @@ class ShareDriver(object):
                        replica, share_server=None):
         """Delete a replica.
 
-        NOTE: This call is made on the host that hosts the replica being
-        deleted.
+        .. note::
+            This call is made on the host that hosts the replica being
+            deleted.
 
         :param context: Current context
-        :param replica_list: List of all replicas for a particular share.
-        This list also contains the replica to be deleted. The 'active'
-        replica will have its 'replica_state' attr set to 'active'.
-            EXAMPLE:
-             .. code::
+        :param replica_list: List of all replicas for a particular share
+            This list also contains the replica to be deleted. The 'active'
+            replica will have its 'replica_state' attr set to 'active'.
+
+        Example::
 
             [
                 {
@@ -1219,38 +1401,41 @@ class ShareDriver(object):
                 },
                 ...
             ]
+
         :param replica: Dictionary of the share replica being deleted.
-            EXAMPLE:
-             .. code::
+
+        Example::
 
             {
-            'id': 'e82ff8b6-65f0-11e5-9d70-feff819cdc9f',
-            'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
-            'deleted': False,
-            'host': 'openstack2@cmodeSSVMNFS2',
-            'status': 'available',
-            'scheduled_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
-            'launched_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
-            'terminated_at': None,
-            'replica_state': 'in_sync',
-            'availability_zone_id': 'f6e146d0-65f0-11e5-9d70-feff819cdc9f',
-            'export_locations': [
-                models.ShareInstanceExportLocations
-            ],
-            'access_rules_status': 'out_of_sync',
-            'share_network_id': '4ccd5318-65f1-11e5-9d70-feff819cdc9f',
-            'share_server_id': '53099868-65f1-11e5-9d70-feff819cdc9f',
-            'share_server': <models.ShareServer> or None,
+                'id': 'e82ff8b6-65f0-11e5-9d70-feff819cdc9f',
+                'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
+                'deleted': False,
+                'host': 'openstack2@cmodeSSVMNFS2',
+                'status': 'available',
+                'scheduled_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
+                'launched_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
+                'terminated_at': None,
+                'replica_state': 'in_sync',
+                'availability_zone_id': 'f6e146d0-65f0-11e5-9d70-feff819cdc9f',
+                'export_locations': [
+                    models.ShareInstanceExportLocations
+                ],
+                'access_rules_status': 'out_of_sync',
+                'share_network_id': '4ccd5318-65f1-11e5-9d70-feff819cdc9f',
+                'share_server_id': '53099868-65f1-11e5-9d70-feff819cdc9f',
+                'share_server': <models.ShareServer> or None,
             }
-        :param replica_snapshots: A list of dictionaries containing snapshot
-        instances that are associated with the share replica being deleted.
-        No model updates are possible in this method. The driver should
-        return when the cleanup is completed on the backend for both,
-        the snapshots and the replica itself. Drivers must handle situations
-        where the snapshot may not yet have finished 'creating' on this
-        replica.
-            EXAMPLE:
-                 .. code::
+
+        :param replica_snapshots: List of dictionaries of snapshot instances.
+            The dict contains snapshot instances that are associated with the
+            share replica being deleted.
+            No model updates to snapshot instances are possible in this method.
+            The driver should return when the cleanup is completed on the
+            backend for both, the snapshots and the replica itself. Drivers
+            must handle situations where the snapshot may not yet have
+            finished 'creating' on this replica.
+
+        Example::
 
                 [
                     {
@@ -1269,12 +1454,14 @@ class ShareDriver(object):
                     },
                     ...
                 ]
-        :param share_server: <models.ShareServer> or None,
-        Share server of the replica to be deleted.
+
+        :param share_server: <models.ShareServer> or None
+            Share server of the replica to be deleted.
         :return: None.
-        :raises Exception. Any exception raised will set the share replica's
-        'status' and 'replica_state' to 'error_deleting'. It will not affect
-        snapshots belonging to this replica.
+        :raises: Exception.
+            Any exception raised will set the share replica's 'status' and
+            'replica_state' attributes to 'error_deleting'. It will not affect
+            snapshots belonging to this replica.
         """
         raise NotImplementedError()
 
@@ -1282,15 +1469,16 @@ class ShareDriver(object):
                         share_server=None):
         """Promote a replica to 'active' replica state.
 
-        NOTE: This call is made on the host that hosts the replica being
-        promoted.
+        .. note::
+            This call is made on the host that hosts the replica being
+            promoted.
 
         :param context: Current context
-        :param replica_list: List of all replicas for a particular share.
-        This list also contains the replica to be promoted. The 'active'
-        replica will have its 'replica_state' attr set to 'active'.
-            EXAMPLE:
-             .. code::
+        :param replica_list: List of all replicas for a particular share
+            This list also contains the replica to be promoted. The 'active'
+            replica will have its 'replica_state' attr set to 'active'.
+
+        Example::
 
             [
                 {
@@ -1321,54 +1509,59 @@ class ShareDriver(object):
             ]
 
         :param replica: Dictionary of the replica to be promoted.
-            EXAMPLE:
-             .. code::
+
+        Example::
 
             {
-            'id': 'e82ff8b6-65f0-11e5-9d70-feff819cdc9f',
-            'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
-            'deleted': False,
-            'host': 'openstack2@cmodeSSVMNFS2',
-            'status': 'available',
-            'scheduled_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
-            'launched_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
-            'terminated_at': None,
-            'replica_state': 'in_sync',
-            'availability_zone_id': 'f6e146d0-65f0-11e5-9d70-feff819cdc9f',
-            'export_locations': [
-                models.ShareInstanceExportLocations
-            ],
-            'access_rules_status': 'in_sync',
-            'share_network_id': '4ccd5318-65f1-11e5-9d70-feff819cdc9f',
-            'share_server_id': '07574742-67ea-4dfd-9844-9fbd8ada3d87',
-            'share_server': <models.ShareServer> or None,
+                'id': 'e82ff8b6-65f0-11e5-9d70-feff819cdc9f',
+                'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
+                'deleted': False,
+                'host': 'openstack2@cmodeSSVMNFS2',
+                'status': 'available',
+                'scheduled_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
+                'launched_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
+                'terminated_at': None,
+                'replica_state': 'in_sync',
+                'availability_zone_id': 'f6e146d0-65f0-11e5-9d70-feff819cdc9f',
+                'export_locations': [
+                    models.ShareInstanceExportLocations
+                ],
+                'access_rules_status': 'in_sync',
+                'share_network_id': '4ccd5318-65f1-11e5-9d70-feff819cdc9f',
+                'share_server_id': '07574742-67ea-4dfd-9844-9fbd8ada3d87',
+                'share_server': <models.ShareServer> or None,
             }
-        :param access_rules: A list of access rules that other instances of
-        the share already obey.
-        EXAMPLE:
-             .. code::
-             [ {
-             'id': 'f0875f6f-766b-4865-8b41-cccb4cdf1676',
-             'deleted' = False,
-             'share_id' = 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
-             'access_type' = 'ip',
-             'access_to' = '172.16.20.1',
-             'access_level' = 'rw',
-             }]
-        :param share_server: <models.ShareServer> or None,
-        Share server of the replica to be promoted.
-        :return: updated_replica_list or None
+
+        :param access_rules: A list of access rules
+            These access rules are obeyed by other instances of the share
+
+        Example::
+
+             [
+              {
+                 'id': 'f0875f6f-766b-4865-8b41-cccb4cdf1676',
+                 'deleted' = False,
+                 'share_id' = 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
+                 'access_type' = 'ip',
+                 'access_to' = '172.16.20.1',
+                 'access_level' = 'rw',
+              }
+             ]
+
+        :param share_server: <models.ShareServer> or None
+            Share server of the replica to be promoted.
+        :return: updated_replica_list or None.
             The driver can return the updated list as in the request
             parameter. Changes that will be updated to the Database are:
             'export_locations', 'access_rules_status' and 'replica_state'.
-        :raises Exception
+        :raises: Exception.
             This can be any exception derived from BaseException. This is
             re-raised by the manager after some necessary cleanup. If the
-            driver raises an exception during promotion, it is assumed
-            that all of the replicas of the share are in an inconsistent
-            state. Recovery is only possible through the periodic update
-            call and/or administrator intervention to correct the 'status'
-            of the affected replicas if they become healthy again.
+            driver raises an exception during promotion, it is assumed that
+            all of the replicas of the share are in an inconsistent state.
+            Recovery is only possible through the periodic update call and/or
+            administrator intervention to correct the 'status' of the affected
+            replicas if they become healthy again.
         """
         raise NotImplementedError()
 
@@ -1377,8 +1570,9 @@ class ShareDriver(object):
                              share_server=None):
         """Update the replica_state of a replica.
 
-        NOTE: This call is made on the host which hosts the replica being
-        updated.
+        .. note::
+            This call is made on the host which hosts the replica being
+            updated.
 
         Drivers should fix replication relationships that were broken if
         possible inside this method.
@@ -1387,11 +1581,11 @@ class ShareDriver(object):
         whenever requested by the administrator through the 'resync' API.
 
         :param context: Current context
-        :param replica_list: List of all replicas for a particular share.
-        This list also contains the replica to be updated. The 'active'
-        replica will have its 'replica_state' attr set to 'active'.
-            EXAMPLE:
-             .. code::
+        :param replica_list: List of all replicas for a particular share
+            This list also contains the replica to be updated. The 'active'
+            replica will have its 'replica_state' attr set to 'active'.
+
+        Example::
 
             [
                 {
@@ -1420,79 +1614,89 @@ class ShareDriver(object):
                 },
                 ...
             ]
-        :param replica: Dictionary of the replica being updated.
-        Replica state will always be 'in_sync', 'out_of_sync', or 'error'.
-        Replicas in 'active' state will not be passed via this parameter.
-            EXAMPLE:
-             .. code::
+
+        :param replica: Dictionary of the replica being updated
+            Replica state will always be 'in_sync', 'out_of_sync', or 'error'.
+            Replicas in 'active' state will not be passed via this parameter.
+
+        Example::
 
             {
-            'id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
-            'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
-            'deleted': False,
-            'host': 'openstack2@cmodeSSVMNFS1',
-            'status': 'available',
-            'scheduled_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
-            'launched_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
-            'terminated_at': None,
-            'replica_state': 'in_sync',
-            'availability_zone_id': 'e2c2db5c-cb2f-4697-9966-c06fb200cb80',
-            'export_locations': [
-                models.ShareInstanceExportLocations,
-            ],
-            'access_rules_status': 'in_sync',
-            'share_network_id': '4ccd5318-65f1-11e5-9d70-feff819cdc9f',
-            'share_server_id': '4ce78e7b-0ef6-4730-ac2a-fd2defefbd05',
-            }
-        :param access_rules: A list of access rules that other replicas of
-        the share already obey. The driver could attempt to sync on any
-        un-applied access_rules.
-        EXAMPLE:
-             .. code::
-             [ {
-             'id': 'f0875f6f-766b-4865-8b41-cccb4cdf1676',
-             'deleted' = False,
-             'share_id' = 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
-             'access_type' = 'ip',
-             'access_to' = '172.16.20.1',
-             'access_level' = 'rw',
-             }]
-        :param replica_snapshots: List of dictionaries of snapshot instances
-        for each snapshot of the share whose 'aggregate_status' property was
-        reported to be 'available' when the share manager initiated this
-        request. Each list member will have two sub dictionaries:
-        'active_replica_snapshot' and 'share_replica_snapshot'. The 'active'
-        replica snapshot corresponds to the instance of the snapshot on any
-        of the 'active' replicas of the share while share_replica_snapshot
-        corresponds to the snapshot instance for the specific replica being
-        updated. The driver needs to ensure that this snapshot instance is
-        truly available before transitioning from 'out_of_sync' to
-        'in_sync'. Snapshots instances for snapshots that have an
-        'aggregate_status' of 'creating' or 'deleting' will be polled for in
-        the update_replicated_snapshot method.
-         EXAMPLE:
-             .. code::
-             [ {
-             'active_replica_snapshot': {
-                'id': '8bda791c-7bb6-4e7b-9b64-fefff85ff13e',
-                'share_instance_id': '10e49c3e-aca9-483b-8c2d-1c337b38d6af',
+                'id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
+                'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
+                'deleted': False,
+                'host': 'openstack2@cmodeSSVMNFS1',
                 'status': 'available',
-                'provider_location': '/newton/share-snapshot-10e49c3e-aca9',
-                ...
+                'scheduled_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
+                'launched_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
+                'terminated_at': None,
+                'replica_state': 'in_sync',
+                'availability_zone_id': 'e2c2db5c-cb2f-4697-9966-c06fb200cb80',
+                'export_locations': [
+                    models.ShareInstanceExportLocations,
+                ],
+                'access_rules_status': 'in_sync',
+                'share_network_id': '4ccd5318-65f1-11e5-9d70-feff819cdc9f',
+                'share_server_id': '4ce78e7b-0ef6-4730-ac2a-fd2defefbd05',
+            }
+
+        :param access_rules: A list of access rules
+            These access rules are obeyed by other instances of the share. The
+            driver could attempt to sync on any un-applied access_rules.
+
+        Example::
+
+             [
+              {
+                 'id': 'f0875f6f-766b-4865-8b41-cccb4cdf1676',
+                 'deleted' = False,
+                 'share_id' = 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
+                 'access_type' = 'ip',
+                 'access_to' = '172.16.20.1',
+                 'access_level' = 'rw',
+              }
+             ]
+
+        :param replica_snapshots: List of dictionaries of snapshot instances.
+            This includes snapshot instances of every snapshot of the share
+            whose 'aggregate_status' property was reported to be 'available'
+            when the share manager initiated this request. Each list member
+            will have two sub dictionaries: 'active_replica_snapshot' and
+            'share_replica_snapshot'. The 'active' replica snapshot corresponds
+            to the instance of the snapshot on any of the 'active' replicas of
+            the share while share_replica_snapshot corresponds to the snapshot
+            instance for the specific replica being updated. The driver needs
+            to ensure that this snapshot instance is truly available before
+            transitioning from 'out_of_sync' to 'in_sync'. Snapshots instances
+            for snapshots that have an 'aggregate_status' of 'creating' or
+            'deleting' will be polled for in the update_replicated_snapshot
+            method.
+
+        Example::
+
+             [
+              {
+            'active_replica_snapshot': {
+                 'id': '8bda791c-7bb6-4e7b-9b64-fefff85ff13e',
+                 'share_instance_id': '10e49c3e-aca9-483b-8c2d-1c337b38d6af',
+                 'status': 'available',
+                 'provider_location': '/newton/share-snapshot-10e49c3e-aca9',
+                 ...
                 },
              'share_replica_snapshot': {
-             'id': ,
-                'share_instance_id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
-                'status': 'creating',
-                'provider_location': None,
+                 'id': '10e49c3e-aca9-483b-8c2d-1c337b38d6af',
+                 'share_instance_id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
+                 'status': 'creating',
+                 'provider_location': None,
                     ...
                 },
-             }]
+              }
+             ]
+
         :param share_server: <models.ShareServer> or None
-        :return: replica_state
-            replica_state - a str value denoting the replica_state that the
-            replica can have. Valid values are 'in_sync' and 'out_of_sync'
-            or None (to leave the current replica_state unchanged).
+        :return: replica_state: a str value denoting the replica_state.
+            Valid values are 'in_sync' and 'out_of_sync' or None (to leave the
+            current replica_state unchanged).
         """
         raise NotImplementedError()
 
@@ -1501,9 +1705,10 @@ class ShareDriver(object):
                                    share_server=None):
         """Create a snapshot on active instance and update across the replicas.
 
-        NOTE: This call is made on the 'active' replica's host. Drivers
-        are expected to transfer the snapshot created to the respective
-        replicas.
+        .. note::
+            This call is made on the 'active' replica's host. Drivers are
+            expected to transfer the snapshot created to the respective
+            replicas.
 
         The driver is expected to return model updates to the share manager.
         If it was able to confirm the creation of any number of the snapshot
@@ -1512,11 +1717,11 @@ class ShareDriver(object):
         to '100%'.
 
         :param context: Current context
-        :param replica_list: List of all replicas for a particular share.
-        The 'active' replica will have its 'replica_state' attr set to
-        'active'.
-            EXAMPLE:
-             .. code::
+        :param replica_list: List of all replicas for a particular share
+            The 'active' replica will have its 'replica_state' attr set to
+            'active'.
+
+        Example::
 
             [
                 {
@@ -1537,11 +1742,14 @@ class ShareDriver(object):
                 },
                 ...
             ]
-        :param replica_snapshots: List of all snapshot instances that track
-         the snapshot across the replicas. All the instances will have their
-         status attribute set to 'creating'.
-            EXAMPLE:
-             .. code::
+
+        :param replica_snapshots: List of dictionaries of snapshot instances.
+            These snapshot instances track the snapshot across the replicas.
+            All the instances will have their status attribute set to
+            'creating'.
+
+        Example::
+
              [
                 {
                 'id': 'd3931a93-3984-421e-a9e7-d9f71895450a',
@@ -1559,12 +1767,13 @@ class ShareDriver(object):
                 },
                 ...
             ]
+
         :param share_server: <models.ShareServer> or None
-        :return: List of replica_snapshots, a list of dictionaries containing
-        values that need to be updated on the database for the snapshot
-        instances being created.
-        :raises: Exception. Any exception in this method will set all
-        instances to 'error'.
+        :return: List of dictionaries of snapshot instances.
+            The dictionaries can contain values that need to be updated on the
+            database for the snapshot instances being created.
+        :raises: Exception.
+            Any exception in this method will set all instances to 'error'.
         """
         raise NotImplementedError()
 
@@ -1572,9 +1781,10 @@ class ShareDriver(object):
                                    replica_snapshots, share_server=None):
         """Delete a snapshot by deleting its instances across the replicas.
 
-        NOTE: This call is made on the 'active' replica's host, since
-        drivers may not be able to delete the snapshot from an individual
-        replica.
+        .. note::
+            This call is made on the 'active' replica's host, since
+            drivers may not be able to delete the snapshot from an individual
+            replica.
 
         The driver is expected to return model updates to the share manager.
         If it was able to confirm the removal of any number of the snapshot
@@ -1583,11 +1793,11 @@ class ShareDriver(object):
         from the database.
 
         :param context: Current context
-        :param replica_list: List of all replicas for a particular share.
-        The 'active' replica will have its 'replica_state' attr set to
-        'active'.
-            EXAMPLE:
-             .. code::
+        :param replica_list: List of all replicas for a particular share
+            The 'active' replica will have its 'replica_state' attr set to
+            'active'.
+
+        Example::
 
             [
                 {
@@ -1608,11 +1818,14 @@ class ShareDriver(object):
                 },
                 ...
             ]
-        :param replica_snapshots: List of all snapshot instances that track
-         the snapshot across the replicas. All the instances will have their
-         status attribute set to 'deleting'.
-         EXAMPLE:
-             .. code::
+
+        :param replica_snapshots: List of dictionaries of snapshot instances.
+            These snapshot instances track the snapshot across the replicas.
+            All the instances will have their status attribute set to
+            'deleting'.
+
+        Example::
+
              [
                 {
                 'id': 'd3931a93-3984-421e-a9e7-d9f71895450a',
@@ -1630,14 +1843,16 @@ class ShareDriver(object):
                 },
                 ...
             ]
+
         :param share_server: <models.ShareServer> or None
-        :return: List of replica_snapshots, a list of dictionaries containing
-        values that need to be updated on the database for the snapshot
-        instances being deleted. To confirm the deletion of the snapshot
-        instance, set the 'status' attribute of the instance to
-        'deleted'(constants.STATUS_DELETED).
-        :raises: Exception. Any exception in this method will set all
-        instances to 'error_deleting'.
+        :return: List of dictionaries of snapshot instances.
+            The dictionaries can contain values that need to be updated on the
+            database for the snapshot instances being deleted. To confirm the
+            deletion of the snapshot instance, set the 'status' attribute of
+            the instance to 'deleted' (constants.STATUS_DELETED)
+        :raises: Exception.
+            Any exception in this method will set the status attribute of all
+            snapshot instances to 'error_deleting'.
         """
         raise NotImplementedError()
 
@@ -1646,8 +1861,9 @@ class ShareDriver(object):
                                    replica_snapshot, share_server=None):
         """Update the status of a snapshot instance that lives on a replica.
 
-        NOTE: For DR and Readable styles of replication, this call is made on
-        the replica's host and not the 'active' replica's host.
+        .. note::
+            For DR and Readable styles of replication, this call is made on
+            the replica's host and not the 'active' replica's host.
 
         This method is called periodically by the share manager. It will
         query for snapshot instances that track the parent snapshot across
@@ -1661,60 +1877,64 @@ class ShareDriver(object):
         instance status to 'error'.
 
         :param context: Current context
-        :param replica_list: List of all replicas for a particular share.
-        The 'active' replica will have its 'replica_state' attr set to
-        'active'.
-            EXAMPLE:
-             .. code::
+        :param replica_list: List of all replicas for a particular share
+            The 'active' replica will have its 'replica_state' attr set to
+            'active'.
+
+        Example::
 
             [
-                {
-                'id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
-                'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
-                'replica_state': 'in_sync',
-                    ...
-                'share_server_id': '4ce78e7b-0ef6-4730-ac2a-fd2defefbd05',
-                'share_server': <models.ShareServer> or None,
-                },
-                {
-                'id': '10e49c3e-aca9-483b-8c2d-1c337b38d6af',
-                'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
-                'replica_state': 'active',
-                    ...
-                'share_server_id': 'f63629b3-e126-4448-bec2-03f788f76094',
-                'share_server': <models.ShareServer> or None,
-                },
-                ...
+                 {
+                  'id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
+                  'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
+                  'replica_state': 'in_sync',
+                  ...
+                  'share_server_id': '4ce78e7b-0ef6-4730-ac2a-fd2defefbd05',
+                  'share_server': <models.ShareServer> or None,
+                 },
+                 {
+                  'id': '10e49c3e-aca9-483b-8c2d-1c337b38d6af',
+                  'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
+                  'replica_state': 'active',
+                  ...
+                  'share_server_id': 'f63629b3-e126-4448-bec2-03f788f76094',
+                  'share_server': <models.ShareServer> or None,
+                 },
+                  ...
             ]
-        :param share_replica: Dictionary of the replica the snapshot instance
-        is meant to be associated with. Replicas in 'active' replica_state
-        will not be passed via this parameter.
-            EXAMPLE:
-             .. code::
+
+        :param share_replica: Share replica dictionary.
+            This replica is associated with the snapshot instance whose
+            status is being updated. Replicas in 'active' replica_state will
+            not be passed via this parameter.
+
+        Example::
 
             {
-            'id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
-            'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
-            'deleted': False,
-            'host': 'openstack2@cmodeSSVMNFS1',
-            'status': 'available',
-            'scheduled_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
-            'launched_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
-            'terminated_at': None,
-            'replica_state': 'in_sync',
-            'availability_zone_id': 'e2c2db5c-cb2f-4697-9966-c06fb200cb80',
-            'export_locations': [
-                models.ShareInstanceExportLocations,
-            ],
-            'access_rules_status': 'in_sync',
-            'share_network_id': '4ccd5318-65f1-11e5-9d70-feff819cdc9f',
-            'share_server_id': '4ce78e7b-0ef6-4730-ac2a-fd2defefbd05',
+                'id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
+                'share_id': 'f0e4bb5e-65f0-11e5-9d70-feff819cdc9f',
+                'deleted': False,
+                'host': 'openstack2@cmodeSSVMNFS1',
+                'status': 'available',
+                'scheduled_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
+                'launched_at': datetime.datetime(2015, 8, 10, 0, 5, 58),
+                'terminated_at': None,
+                'replica_state': 'in_sync',
+                'availability_zone_id': 'e2c2db5c-cb2f-4697-9966-c06fb200cb80',
+                'export_locations': [
+                    models.ShareInstanceExportLocations,
+                ],
+                'access_rules_status': 'in_sync',
+                'share_network_id': '4ccd5318-65f1-11e5-9d70-feff819cdc9f',
+                'share_server_id': '4ce78e7b-0ef6-4730-ac2a-fd2defefbd05',
             }
-        :param replica_snapshots: List of all snapshot instances that track
-         the snapshot across the replicas. This will include the instance
-         being updated as well.
-         EXAMPLE:
-             .. code::
+
+        :param replica_snapshots: List of dictionaries of snapshot instances.
+            These snapshot instances track the snapshot across the replicas.
+            This will include the snapshot instance being updated as well.
+
+        Example::
+
              [
                 {
                 'id': 'd3931a93-3984-421e-a9e7-d9f71895450a',
@@ -1728,34 +1948,91 @@ class ShareDriver(object):
                 },
                 ...
             ]
-        :param replica_snapshot: Dictionary of the snapshot instance to be
-        updated. replica_snapshot will be in 'creating' or 'deleting'
-        states when sent via this parameter.
-            EXAMPLE:
-             .. code::
+
+        :param replica_snapshot: Dictionary of the snapshot instance.
+            This is the instance to be updated. It will be in 'creating' or
+            'deleting' state when sent via this parameter.
+
+        Example::
 
             {
-            'name': 'share-snapshot-18825630-574f-4912-93bb-af4611ef35a2',
-            'share_id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
-            'share_name': 'share-d487b88d-e428-4230-a465-a800c2cce5f8',
-            'status': 'creating',
-            'id': '18825630-574f-4912-93bb-af4611ef35a2',
-            'deleted': False,
-            'created_at': datetime.datetime(2016, 8, 3, 0, 5, 58),
-            'share': <models.ShareInstance>,
-            'updated_at': datetime.datetime(2016, 8, 3, 0, 5, 58),
-            'share_instance_id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
-            'snapshot_id': '13ee5cb5-fc53-4539-9431-d983b56c5c40',
-            'progress': '0%',
-            'deleted_at': None,
-            'provider_location': None,
+                'name': 'share-snapshot-18825630-574f-4912-93bb-af4611ef35a2',
+                'share_id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
+                'share_name': 'share-d487b88d-e428-4230-a465-a800c2cce5f8',
+                'status': 'creating',
+                'id': '18825630-574f-4912-93bb-af4611ef35a2',
+                'deleted': False,
+                'created_at': datetime.datetime(2016, 8, 3, 0, 5, 58),
+                'share': <models.ShareInstance>,
+                'updated_at': datetime.datetime(2016, 8, 3, 0, 5, 58),
+                'share_instance_id': 'd487b88d-e428-4230-a465-a800c2cce5f8',
+                'snapshot_id': '13ee5cb5-fc53-4539-9431-d983b56c5c40',
+                'progress': '0%',
+                'deleted_at': None,
+                'provider_location': None,
             }
+
         :param share_server: <models.ShareServer> or None
-        :return: replica_snapshot_model_update, a dictionary containing
-        values that need to be updated on the database for the snapshot
-        instance that represents the snapshot on the replica.
-        :raises: exception.SnapshotResourceNotFound for
-        snapshots that are not found on the backend and their status was
-        'deleting'.
+        :return: replica_snapshot_model_update: a dictionary.
+            The dictionary must contain values that need to be updated on the
+            database for the snapshot instance that represents the snapshot on
+            the replica.
+        :raises: exception.SnapshotResourceNotFound
+            Raise this exception for snapshots that are not found on the
+            backend and their status was 'deleting'.
         """
         raise NotImplementedError()
+
+    def get_filter_function(self):
+        """Get filter_function string.
+
+        Returns either the string from the driver instance or global section
+        in manila.conf. If nothing is specified in manila.conf, then try to
+        find the default filter_function. When None is returned the scheduler
+        will always pass the driver instance.
+
+        :return a filter_function string or None
+        """
+        ret_function = self.configuration.filter_function
+        if not ret_function:
+            ret_function = CONF.filter_function
+        if not ret_function:
+            ret_function = self.get_default_filter_function()
+        return ret_function
+
+    def get_goodness_function(self):
+        """Get good_function string.
+
+        Returns either the string from the driver instance or global section
+        in manila.conf. If nothing is specified in manila.conf, then try to
+        find the default goodness_function. When None is returned the scheduler
+        will give the lowest score to the driver instance.
+
+        :return a goodness_function string or None
+        """
+        ret_function = self.configuration.goodness_function
+        if not ret_function:
+            ret_function = CONF.goodness_function
+        if not ret_function:
+            ret_function = self.get_default_goodness_function()
+        return ret_function
+
+    def get_default_filter_function(self):
+        """Get the default filter_function string.
+
+        Each driver could overwrite the method to return a well-known
+        default string if it is available.
+
+        :return: None
+        """
+        return None
+
+    def get_default_goodness_function(self):
+        """Get the default goodness_function string.
+
+        Each driver could overwrite the method to return a well-known
+        default string if it is available.
+
+        :return: None
+        """
+        return None

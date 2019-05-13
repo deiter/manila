@@ -14,7 +14,7 @@
       under the License.
 
 HPE 3PAR Driver
-==============
+===============
 
 The HPE 3PAR manila driver provides NFS and CIFS shared file systems to
 OpenStack using HPE 3PAR's File Persona capabilities.
@@ -36,23 +36,14 @@ The following operations are supported with HPE 3PAR File Persona:
 - Allow/deny NFS share access
 
   * IP access rules are required for NFS share access
-  * User access rules are not allowed for NFS shares
-  * Access level (RW/RO) is ignored
-  * Shares created from snapshots are always read-only
-  * Shares not created from snapshots are read-write (and subject to ACLs)
 
 - Allow/deny CIFS share access
 
-  * Both IP and user access rules are required for CIFS share access
-  * User access requires a 3PAR local user (LDAP and AD is not yet supported)
-  * Access level (RW/RO) is ignored
-  * Shares created from snapshots are always read-only
-  * Shares not created from snapshots are read-write (and subject to ACLs)
+  * CIFS shares require user access rules.
+  * User access requires a 3PAR local or AD user (LDAP is not yet supported)
 
 - Create/delete snapshots
 - Create shares from snapshots
-
-  * Shares created from snapshots are always read-only
 
 Share networks are not supported. Shares are created directly on the 3PAR
 without the use of a share server or service VM. Network connectivity is
@@ -63,7 +54,7 @@ Requirements
 
 On the system running the manila share service:
 
-- python-3parclient 4.0.0 or newer from PyPI.
+- python-3parclient 4.2.0 or newer from PyPI.
 
 On the HPE 3PAR array:
 
@@ -72,7 +63,7 @@ On the HPE 3PAR array:
 - The array class and hardware configuration must support File Persona
 
 Pre-Configuration on the HPE 3PAR
---------------------------------
+---------------------------------
 
 - HPE 3PAR File Persona must be initialized and started (:code:`startfs`)
 - A File Provisioning Group (FPG) must be created for use with manila
@@ -98,14 +89,94 @@ file for the HPE 3PAR driver:
 - `hpe3par_san_login` = <Username for SSH access to the SAN controller>
 - `hpe3par_san_password` = <Password for SSH access to the SAN controller>
 - `hpe3par_debug` = <False or True for extra debug logging>
+- `hpe3par_cifs_admin_access_username` = <CIFS admin user name>
+- `hpe3par_cifs_admin_access_password` = <CIFS admin password>
+- `hpe3par_cifs_admin_access_domain` = <CIFS admin domain>
+- `hpe3par_share_mount_path` = <Full path to mount shares>
 
 The `hpe3par_share_ip_address` must be a valid IP address for the configured
 FPG's VFS. This IP address is used in export locations for shares that are
 created. Networking must be configured to allow connectivity from clients to
 shares.
 
+`hpe3par_cifs_admin_access_username` and `hpe3par_cifs_admin_access_password`
+must be provided to delete nested CIFS shares. If they are not, the share
+contents will not be deleted. `hpe3par_cifs_admin_access_domain` and
+`hpe3par_share_mount_path` can be provided for additional configuration.
+
 Restart of :term:`manila-share` service is needed for the configuration changes to take
 effect.
+
+Backend Configuration for AD user
+---------------------------------
+
+The following parameters need to be configured through HPE 3PAR CLI to access
+file share using AD.
+
+Set authentication parameters::
+
+    $ setauthparam ldap-server IP_ADDRESS_OF_AD_SERVER
+    $ setauthparam binding simple
+    $ setauthparam user-attr AD_DOMAIN_NAME\\
+    $ setauthparam accounts-dn CN=Users,DC=AD,DC=DOMAIN,DC=NAME
+    $ setauthparam account-obj user
+    $ setauthparam account-name-attr sAMAccountName
+    $ setauthparam memberof-attr memberOf
+    $ setauthparam super-map CN=AD_USER_GROUP,DC=AD,DC=DOMAIN,DC=NAME
+
+Verify new authentication parameters set as expected::
+
+    $ showauthparam
+
+Verify AD users set as expected::
+
+    $ checkpassword AD_USER
+
+Command result should show ``user AD_USER is authenticated and authorized``
+message on successful configuration.
+
+Add 'ActiveDirectory' in authentication providers list::
+
+    $ setfs auth ActiveDirectory Local
+
+Verify authentication provider list shows 'ActiveDirectory'::
+
+    $ showfs -auth
+
+Set/Add AD user on FS::
+
+    $ setfs ad –passwd PASSWORD AD_USER AD_DOMAIN_NAME
+
+Verify FS user details::
+
+    $ showfs -ad
+
+Example of using AD user to access CIFS share
+---------------------------------------------
+
+Pre-requisite:
+
+- Share type should be configured for 3PAR backend
+
+Create a CIFS file share with 2GB of size::
+
+    $ manila create --name FILE_SHARE_NAME --share-type SHARE_TYPE CIFS 2
+
+Check file share created as expected::
+
+    $ manila show FILE_SHARE_NAME
+
+Configuration to provide share access to AD user::
+
+    $ manila access-allow FILE_SHARE_NAME user AD_DOMAIN_NAME\\\\AD_USER
+      --access-level rw
+
+Check users permission set as expected::
+
+    $ manila access-list FILE_SHARE_NAME
+
+The AD_DOMAIN_NAME\\AD_USER must be listed in access_to column and should
+show active in its state column as result of this command.
 
 Network Approach
 ----------------
@@ -210,8 +281,23 @@ All other NFS options are forwarded to the HPE 3PAR as part of share creation.
 The HPE 3PAR will do additional validation at share creation time. Refer to
 HPE 3PAR CLI help for more details.
 
+Delete Nested Shares
+--------------------
+
+When a nested share is deleted (nested shares will be created when
+``hpe_3par_fstore_per_share`` is set to ``False``), the file tree also
+attempts to be deleted.
+
+With NFS shares, there is no additional configuration that needs to be done.
+
+For CIFS shares, ``hpe3par_cifs_admin_access_username`` and
+``hpe3par_cifs_admin_access_password`` must be provided. If they are omitted,
+the original functionality is honored and the file tree remains untouched.
+``hpe3par_cifs_admin_access_domain`` and ``hpe3par_share_mount_path`` can also
+be specified to create further customization.
+
 The :mod:`manila.share.drivers.hpe.hpe_3par_driver` Module
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: manila.share.drivers.hpe.hpe_3par_driver
     :noindex:

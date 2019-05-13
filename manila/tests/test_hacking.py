@@ -15,15 +15,15 @@
 import sys
 import textwrap
 
+import ddt
 import mock
 import pep8
-import six
-import testtools
 
 from manila.hacking import checks
 from manila import test
 
 
+@ddt.ddt
 class HackingTestCase(test.TestCase):
     """Hacking test cases
 
@@ -70,41 +70,41 @@ class HackingTestCase(test.TestCase):
     def test_check_explicit_underscore_import(self):
         self.assertEqual(1, len(list(checks.check_explicit_underscore_import(
             "LOG.info(_('My info message'))",
-            "cinder/tests/other_files.py"))))
+            "manila/tests/other_files.py"))))
         self.assertEqual(1, len(list(checks.check_explicit_underscore_import(
             "msg = _('My message')",
-            "cinder/tests/other_files.py"))))
+            "manila/tests/other_files.py"))))
         self.assertEqual(0, len(list(checks.check_explicit_underscore_import(
-            "from cinder.i18n import _",
-            "cinder/tests/other_files.py"))))
+            "from manila.i18n import _",
+            "manila/tests/other_files.py"))))
         self.assertEqual(0, len(list(checks.check_explicit_underscore_import(
             "LOG.info(_('My info message'))",
-            "cinder/tests/other_files.py"))))
+            "manila/tests/other_files.py"))))
         self.assertEqual(0, len(list(checks.check_explicit_underscore_import(
             "msg = _('My message')",
-            "cinder/tests/other_files.py"))))
+            "manila/tests/other_files.py"))))
         self.assertEqual(0, len(list(checks.check_explicit_underscore_import(
-            "from cinder.i18n import _LE, _, _LW",
-            "cinder/tests/other_files2.py"))))
+            "from manila.i18n import _LE, _, _LW",
+            "manila/tests/other_files2.py"))))
         self.assertEqual(0, len(list(checks.check_explicit_underscore_import(
             "msg = _('My message')",
-            "cinder/tests/other_files2.py"))))
+            "manila/tests/other_files2.py"))))
         self.assertEqual(0, len(list(checks.check_explicit_underscore_import(
             "_ = translations.ugettext",
-            "cinder/tests/other_files3.py"))))
+            "manila/tests/other_files3.py"))))
         self.assertEqual(0, len(list(checks.check_explicit_underscore_import(
             "msg = _('My message')",
-            "cinder/tests/other_files3.py"))))
+            "manila/tests/other_files3.py"))))
         # Complete code coverage by falling through all checks
         self.assertEqual(0, len(list(checks.check_explicit_underscore_import(
             "LOG.info('My info message')",
-            "cinder.tests.unit/other_files4.py"))))
+            "manila.tests.unit/other_files4.py"))))
         self.assertEqual(0, len(list(checks.check_explicit_underscore_import(
-            "from cinder.i18n import _LW",
-            "cinder.tests.unit/other_files5.py"))))
+            "from manila.i18n import _LW",
+            "manila.tests.unit/other_files5.py"))))
         self.assertEqual(1, len(list(checks.check_explicit_underscore_import(
             "msg = _('My message')",
-            "cinder.tests.unit/other_files5.py"))))
+            "manila.tests.unit/other_files5.py"))))
 
     # We are patching pep8 so that only the check under test is actually
     # installed.
@@ -126,10 +126,36 @@ class HackingTestCase(test.TestCase):
                          self._run_check(code, checker, filename)]
         self.assertEqual(expected_errors or [], actual_errors)
 
-    @testtools.skipIf(six.PY3, "It is PY2-specific. Skip it for PY3.")
-    def test_str_exception(self):
+    def _assert_has_no_errors(self, code, checker, filename=None):
+        self._assert_has_errors(code, checker, filename=filename)
 
-        checker = checks.CheckForStrExc
+    def test_logging_format_no_tuple_arguments(self):
+        checker = checks.CheckLoggingFormatArgs
+        code = """
+               import logging
+               LOG = logging.getLogger()
+               LOG.info("Message without a second argument.")
+               LOG.critical("Message with %s arguments.", 'two')
+               LOG.debug("Volume %s caught fire and is at %d degrees C and"
+                         " climbing.", 'volume1', 500)
+               """
+        self._assert_has_no_errors(code, checker)
+
+    @ddt.data(*checks.CheckLoggingFormatArgs.LOG_METHODS)
+    def test_logging_with_tuple_argument(self, log_method):
+        checker = checks.CheckLoggingFormatArgs
+        code = """
+               import logging
+               LOG = logging.getLogger()
+               LOG.{0}("Volume %s caught fire and is at %d degrees C and "
+                      "climbing.", ('volume1', 500))
+               """
+        self._assert_has_errors(code.format(log_method), checker,
+                                expected_errors=[(4, 21, 'M310')])
+
+    def test_str_on_exception(self):
+
+        checker = checks.CheckForStrUnicodeExc
         code = """
                def f(a, b):
                    try:
@@ -141,6 +167,20 @@ class HackingTestCase(test.TestCase):
         errors = [(5, 16, 'M325')]
         self._assert_has_errors(code, checker, expected_errors=errors)
 
+    def test_no_str_unicode_on_exception(self):
+        checker = checks.CheckForStrUnicodeExc
+        code = """
+               def f(a, b):
+                   try:
+                       p = unicode(a) + str(b)
+                   except ValueError as e:
+                       p = e
+                   return p
+               """
+        self._assert_has_no_errors(code, checker)
+
+    def test_unicode_on_exception(self):
+        checker = checks.CheckForStrUnicodeExc
         code = """
                def f(a, b):
                    try:
@@ -149,9 +189,11 @@ class HackingTestCase(test.TestCase):
                        p = unicode(e)
                    return p
                """
-        errors = []
+        errors = [(5, 20, 'M325')]
         self._assert_has_errors(code, checker, expected_errors=errors)
 
+    def test_str_on_multiple_exceptions(self):
+        checker = checks.CheckForStrUnicodeExc
         code = """
                def f(a, b):
                    try:
@@ -161,10 +203,27 @@ class HackingTestCase(test.TestCase):
                            p  = unicode(a) + unicode(b)
                        except ValueError as ve:
                            p = str(e) + str(ve)
-                       p = unicode(e)
+                       p = e
                    return p
                """
         errors = [(8, 20, 'M325'), (8, 29, 'M325')]
+        self._assert_has_errors(code, checker, expected_errors=errors)
+
+    def test_str_unicode_on_multiple_exceptions(self):
+        checker = checks.CheckForStrUnicodeExc
+        code = """
+               def f(a, b):
+                   try:
+                       p = str(a) + str(b)
+                   except ValueError as e:
+                       try:
+                           p  = unicode(a) + unicode(b)
+                       except ValueError as ve:
+                           p = str(e) + unicode(ve)
+                       p = str(e)
+                   return p
+               """
+        errors = [(8, 20, 'M325'), (8, 33, 'M325'), (9, 16, 'M325')]
         self._assert_has_errors(code, checker, expected_errors=errors)
 
     def test_trans_add(self):
@@ -243,3 +302,17 @@ class HackingTestCase(test.TestCase):
         self.assertEqual(1, len(list(checks.no_xrange("xrange(45)"))))
 
         self.assertEqual(0, len(list(checks.no_xrange("range(45)"))))
+
+    def test_validate_assertTrue(self):
+        test_value = True
+        self.assertEqual(0, len(list(checks.validate_assertTrue(
+            "assertTrue(True)"))))
+        self.assertEqual(1, len(list(checks.validate_assertTrue(
+            "assertEqual(True, %s)" % test_value))))
+
+    def test_validate_assertIsNone(self):
+        test_value = None
+        self.assertEqual(0, len(list(checks.validate_assertIsNone(
+            "assertIsNone(None)"))))
+        self.assertEqual(1, len(list(checks.validate_assertIsNone(
+            "assertEqual(None, %s)" % test_value))))

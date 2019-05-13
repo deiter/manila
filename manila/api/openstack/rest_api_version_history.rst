@@ -95,7 +95,7 @@ user documentation.
   Add 'cephx' authentication type for the CephFS Native driver.
 
 2.14
-____
+----
   Added attribute 'preferred' to export locations.  Drivers may use this
   field to identify which export locations are most efficient and should be
   used preferentially by clients.  Also, change 'uuid' field to 'id', move
@@ -106,3 +106,35 @@ ____
   Added Share migration 'migration_cancel', 'migration_get_progress',
   'migration_complete' APIs, renamed 'migrate_share' to 'migration_start' and
   added notify parameter to 'migration_start'.
+
+2.16
+----
+  Add user_id in share show/create/manage API.
+
+2.17
+----
+  Added user_id and project_id in snapshot show/create/manage APIs.
+
+2.18
+----
+  Add gateway in share network show API.
+
+2.19
+----
+  Add admin APIs(list/show/detail/reset-status) of snapshot instances.
+
+2.20
+----
+  Add MTU in share network show API.
+
+2.21
+----
+  Add access_key in access_list API.
+
+2.22
+----
+  Updated migration_start API with 'preserve-metadata', 'writable',
+  'nondisruptive' and 'new_share_network_id' parameters, renamed
+  'force_host_copy' to 'force_host_assisted_migration', removed 'notify'
+  parameter and removed previous migrate_share API support. Updated
+  reset_task_state API to accept 'None' value.

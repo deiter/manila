@@ -89,7 +89,7 @@ class ManilaException(Exception):
             try:
                 message = self.message % kwargs
 
-            except Exception as e:
+            except Exception:
                 # kwargs doesn't match a variable in the message
                 # log the issue and the kwargs
                 LOG.exception(_LE('Exception in string format operation.'))
@@ -97,7 +97,7 @@ class ManilaException(Exception):
                     LOG.error(_LE("%(name)s: %(value)s"), {
                         'name': name, 'value': value})
                 if CONF.fatal_exception_format_errors:
-                    raise e
+                    raise
                 else:
                     # at least get the core message out if something happened
                     message = self.message
@@ -112,6 +112,10 @@ class ManilaException(Exception):
 
 class NetworkException(ManilaException):
     message = _("Exception due to network failure.")
+
+
+class NetworkBindException(ManilaException):
+    message = _("Exception due to failed port status in binding.")
 
 
 class NetworkBadConfigurationException(NetworkException):
@@ -238,6 +242,10 @@ class InvalidShareServer(Invalid):
     message = _("Share server %(share_server_id)s is not valid.")
 
 
+class ShareMigrationError(ManilaException):
+    message = _("Error in share migration: %(reason)s")
+
+
 class ShareMigrationFailed(ManilaException):
     message = _("Share migration failed: %(reason)s")
 
@@ -261,6 +269,11 @@ class AdminIPNotFound(ManilaException):
 
 class ShareServerNotCreated(ManilaException):
     message = _("Share server %(share_server_id)s failed on creation.")
+
+
+class ShareServerNotReady(ManilaException):
+    message = _("Share server %(share_server_id)s failed to reach '%(state)s' "
+                "within %(time)s seconds.")
 
 
 class ServiceNotFound(NotFound):

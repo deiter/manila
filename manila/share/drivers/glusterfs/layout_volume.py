@@ -28,10 +28,7 @@ from oslo_log import log
 import six
 
 from manila import exception
-from manila.i18n import _
-from manila.i18n import _LE
-from manila.i18n import _LI
-from manila.i18n import _LW
+from manila.i18n import _, _LE, _LI, _LW
 from manila.share.drivers.glusterfs import common
 from manila.share.drivers.glusterfs import layout
 from manila import utils
@@ -498,7 +495,7 @@ class GlusterfsVolumeMappedLayout(layout.GlusterfsShareLayoutBase):
                 *args,
                 log=_LE("Creating share from snapshot"))
 
-        # Get a manager for the the new volume/share.
+        # Get a manager for the new volume/share.
         comp_vol = old_gmgr.components.copy()
         comp_vol.update({'volume': volume})
         gmgr = self._glustermanager(comp_vol)
@@ -542,7 +539,7 @@ class GlusterfsVolumeMappedLayout(layout.GlusterfsShareLayoutBase):
             outxml = etree.fromstring(out)
             opret = int(common.volxml_get(outxml, 'opRet'))
             operrno = int(common.volxml_get(outxml, 'opErrno'))
-            operrstr = common.volxml_get(outxml, 'opErrstr', None)
+            operrstr = common.volxml_get(outxml, 'opErrstr', default=None)
 
         if opret == -1:
             vers = self.glusterfs_versions[gluster_mgr.host_access]

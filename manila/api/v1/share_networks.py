@@ -27,9 +27,7 @@ from manila.api.openstack import wsgi
 from manila.api.views import share_networks as share_networks_views
 from manila.db import api as db_api
 from manila import exception
-from manila.i18n import _
-from manila.i18n import _LE
-from manila.i18n import _LW
+from manila.i18n import _, _LE, _LW
 from manila import policy
 from manila import quota
 from manila.share import rpcapi as share_rpcapi
@@ -59,7 +57,7 @@ class ShareNetworkController(wsgi.Controller):
         except exception.ShareNetworkNotFound as e:
             raise exc.HTTPNotFound(explanation=six.text_type(e))
 
-        return self._view_builder.build_share_network(share_network)
+        return self._view_builder.build_share_network(req, share_network)
 
     def delete(self, req, id):
         """Delete specified share network."""
@@ -172,7 +170,8 @@ class ShareNetworkController(wsgi.Controller):
                             if network[key] == value]
 
         limited_list = common.limited(networks, req)
-        return self._view_builder.build_share_networks(limited_list, is_detail)
+        return self._view_builder.build_share_networks(
+            req, limited_list, is_detail)
 
     def index(self, req):
         """Returns a summary list of share networks."""
@@ -236,7 +235,7 @@ class ShareNetworkController(wsgi.Controller):
             msg = "Could not save supplied data due to database error"
             raise exc.HTTPBadRequest(explanation=msg)
 
-        return self._view_builder.build_share_network(share_network)
+        return self._view_builder.build_share_network(req, share_network)
 
     def create(self, req, body):
         """Creates a new share network."""
@@ -279,7 +278,7 @@ class ShareNetworkController(wsgi.Controller):
                 raise exc.HTTPBadRequest(explanation=msg)
 
             QUOTAS.commit(context, reservations)
-            return self._view_builder.build_share_network(share_network)
+            return self._view_builder.build_share_network(req, share_network)
 
     def action(self, req, id, body):
         _actions = {
@@ -324,7 +323,7 @@ class ShareNetworkController(wsgi.Controller):
         except exception.ShareNetworkSecurityServiceAssociationError as e:
             raise exc.HTTPBadRequest(explanation=six.text_type(e))
 
-        return self._view_builder.build_share_network(share_network)
+        return self._view_builder.build_share_network(req, share_network)
 
     def _remove_security_service(self, req, id, data):
         """Dissociate share network from a given security service."""
@@ -347,7 +346,7 @@ class ShareNetworkController(wsgi.Controller):
         except exception.ShareNetworkSecurityServiceDissociationError as e:
             raise exc.HTTPBadRequest(explanation=six.text_type(e))
 
-        return self._view_builder.build_share_network(share_network)
+        return self._view_builder.build_share_network(req, share_network)
 
 
 def create_resource():

@@ -13,10 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from tempest import config  # noqa
-from tempest.lib import exceptions as lib_exc  # noqa
-from tempest import test  # noqa
-import testtools  # noqa
+from tempest import config
+from tempest.lib import exceptions as lib_exc
+from tempest import test
+import testtools
 
 from manila_tempest_tests.tests.api import base
 
@@ -32,7 +32,7 @@ CGSNAPSHOT_REQUIRED_ELEMENTS = {"id", "name", "description", "created_at",
 class ConsistencyGroupsTest(base.BaseSharesTest):
     """Covers consistency group functionality."""
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     def test_create_populate_delete_consistency_group_v2_4(self):
         # Create a consistency group
         consistency_group = self.create_consistency_group(
@@ -46,7 +46,6 @@ class ConsistencyGroupsTest(base.BaseSharesTest):
         # Populate
         share = self.create_share(consistency_group_id=consistency_group['id'],
                                   cleanup_in_class=False,
-                                  client=self.shares_v2_client,
                                   version='2.4')
         # Delete
         params = {"consistency_group_id": consistency_group['id']}
@@ -66,7 +65,7 @@ class ConsistencyGroupsTest(base.BaseSharesTest):
                           self.shares_client.get_share,
                           share['id'])
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_API_WITH_BACKEND])
     def test_create_delete_empty_cgsnapshot_v2_4(self):
         # Create base consistency group
         consistency_group = self.create_consistency_group(
@@ -99,7 +98,7 @@ class ConsistencyGroupsTest(base.BaseSharesTest):
                           cgsnapshot['id'],
                           version='2.4')
 
-    @test.attr(type=["gate", "smoke", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_API_WITH_BACKEND])
     def test_create_consistency_group_from_empty_cgsnapshot(self):
         # Create base consistency group
         consistency_group = self.create_consistency_group(
@@ -125,7 +124,7 @@ class ConsistencyGroupsTest(base.BaseSharesTest):
         self.assertEmpty(new_shares,
                          'Expected 0 new shares, got %s' % len(new_shares))
 
-        msg = 'Expected cgsnapshot_id %s as source of share %s' % (
+        msg = 'Expected cgsnapshot_id %s as source of consistency group %s' % (
             cgsnapshot['id'], new_consistency_group['source_cgsnapshot_id'])
         self.assertEqual(new_consistency_group['source_cgsnapshot_id'],
                          cgsnapshot['id'], msg)
@@ -135,3 +134,11 @@ class ConsistencyGroupsTest(base.BaseSharesTest):
                                 new_consistency_group['share_types']))
         self.assertEqual(sorted(consistency_group['share_types']),
                          sorted(new_consistency_group['share_types']), msg)
+
+        # Assert the share_network information is the same
+        msg = 'Expected share_network %s as share_network of cg %s' % (
+            consistency_group['share_network_id'],
+            new_consistency_group['share_network_id'])
+        self.assertEqual(consistency_group['share_network_id'],
+                         new_consistency_group['share_network_id'],
+                         msg)

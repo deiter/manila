@@ -65,6 +65,10 @@ SHARE_TYPE_ID = '26e89a5b-960b-46bb-a8cf-0778e653098f'
 SHARE_TYPE_NAME = 'fake_share_type'
 IPSPACE = 'fake_ipspace'
 IPSPACE_ID = '27d38c27-3e8b-4d7d-9d91-fcf295e3ac8f'
+MTU = 1234
+DEFAULT_MTU = 1500
+MANILA_HOST_NAME = '%(host)s@%(backend)s#%(pool)s' % {
+    'host': HOST_NAME, 'backend': BACKEND_NAME, 'pool': POOL_NAME}
 
 CLIENT_KWARGS = {
     'username': 'admin',
@@ -78,8 +82,7 @@ CLIENT_KWARGS = {
 
 SHARE = {
     'id': SHARE_ID,
-    'host': '%(host)s@%(backend)s#%(pool)s' % {
-        'host': HOST_NAME, 'backend': BACKEND_NAME, 'pool': POOL_NAME},
+    'host': MANILA_HOST_NAME,
     'project_id': TENANT_ID,
     'name': SHARE_NAME,
     'size': SHARE_SIZE,
@@ -109,6 +112,7 @@ EXTRA_SPEC = {
     'netapp:dedup': 'True',
     'netapp:compression': 'false',
     'netapp:max_files': 5000,
+    'netapp:split_clone_on_create': 'true',
     'netapp_disk_type': 'FCAL',
     'netapp_raid_type': 'raid4',
 }
@@ -120,12 +124,14 @@ PROVISIONING_OPTIONS = {
     'dedup_enabled': True,
     'compression_enabled': False,
     'max_files': 5000,
+    'split': True,
 }
 
 PROVISIONING_OPTIONS_BOOLEAN = {
     'thin_provisioned': True,
     'dedup_enabled': False,
     'compression_enabled': False,
+    'split': False,
 }
 
 PROVISIONING_OPTIONS_BOOLEAN_THIN_PROVISIONED_TRUE = {
@@ -135,6 +141,7 @@ PROVISIONING_OPTIONS_BOOLEAN_THIN_PROVISIONED_TRUE = {
     'dedup_enabled': False,
     'compression_enabled': False,
     'max_files': None,
+    'split': False,
 }
 
 PROVISIONING_OPTIONS_STRING = {
@@ -219,6 +226,7 @@ USER_NETWORK_ALLOCATIONS = [
         'segmentation_id': '1000',
         'network_type': 'vlan',
         'label': 'user',
+        'mtu': MTU,
     },
     {
         'id': '7eabdeed-bad2-46ea-bd0f-a33884c869e0',
@@ -227,6 +235,7 @@ USER_NETWORK_ALLOCATIONS = [
         'segmentation_id': '1000',
         'network_type': 'vlan',
         'label': 'user',
+        'mtu': MTU,
     }
 ]
 
@@ -238,6 +247,7 @@ ADMIN_NETWORK_ALLOCATIONS = [
         'segmentation_id': None,
         'network_type': 'flat',
         'label': 'admin',
+        'mtu': MTU,
     },
 ]
 
@@ -247,6 +257,7 @@ NETWORK_INFO = {
     'network_allocations': USER_NETWORK_ALLOCATIONS,
     'admin_network_allocations': ADMIN_NETWORK_ALLOCATIONS,
     'neutron_subnet_id': '62bf1c2c-18eb-421b-8983-48a6d39aafe0',
+    'segmentation_id': '1000',
 }
 NETWORK_INFO_NETMASK = '255.255.255.0'
 
@@ -265,6 +276,14 @@ SNAPSHOT = {
     'share_id': PARENT_SHARE_ID,
     'status': constants.STATUS_CREATING,
     'provider_location': None,
+}
+
+SNAPSHOT_TO_MANAGE = {
+    'id': SNAPSHOT_ID,
+    'project_id': TENANT_ID,
+    'share_id': PARENT_SHARE_ID,
+    'status': constants.STATUS_CREATING,
+    'provider_location': SNAPSHOT_NAME,
 }
 
 CDOT_SNAPSHOT = {
@@ -492,82 +511,93 @@ AGGREGATE_CAPACITIES_VSERVER_CREDS = {
 SSC_INFO = {
     AGGREGATES[0]: {
         'netapp_raid_type': 'raid4',
-        'netapp_disk_type': 'FCAL'
+        'netapp_disk_type': 'FCAL',
+        'netapp_hybrid_aggregate': 'false',
     },
     AGGREGATES[1]: {
         'netapp_raid_type': 'raid_dp',
-        'netapp_disk_type': 'SSD'
+        'netapp_disk_type': ['SATA', 'SSD'],
+        'netapp_hybrid_aggregate': 'true',
     }
 }
 
 POOLS = [
     {'pool_name': AGGREGATES[0],
+     'netapp_aggregate': AGGREGATES[0],
      'total_capacity_gb': 3.3,
      'free_capacity_gb': 1.1,
      'allocated_capacity_gb': 2.2,
      'qos': 'False',
-     'reserved_percentage': 0,
+     'reserved_percentage': 5,
      'dedupe': [True, False],
      'compression': [True, False],
      'thin_provisioning': [True, False],
      'netapp_raid_type': 'raid4',
-     'netapp_disk_type': 'FCAL'
+     'netapp_disk_type': 'FCAL',
+     'netapp_hybrid_aggregate': 'false',
      },
     {'pool_name': AGGREGATES[1],
+     'netapp_aggregate': AGGREGATES[1],
      'total_capacity_gb': 6.0,
      'free_capacity_gb': 2.0,
      'allocated_capacity_gb': 4.0,
      'qos': 'False',
-     'reserved_percentage': 0,
+     'reserved_percentage': 5,
      'dedupe': [True, False],
      'compression': [True, False],
      'thin_provisioning': [True, False],
      'netapp_raid_type': 'raid_dp',
-     'netapp_disk_type': 'SSD'
+     'netapp_disk_type': ['SATA', 'SSD'],
+     'netapp_hybrid_aggregate': 'true',
      },
 ]
 
 POOLS_VSERVER_CREDS = [
     {'pool_name': AGGREGATES[0],
+     'netapp_aggregate': AGGREGATES[0],
      'total_capacity_gb': 'unknown',
      'free_capacity_gb': 1.1,
      'allocated_capacity_gb': 0.0,
      'qos': 'False',
-     'reserved_percentage': 0,
+     'reserved_percentage': 5,
      'dedupe': [True, False],
      'compression': [True, False],
      'thin_provisioning': [True, False],
-     'netapp_raid_type': 'raid4',
-     'netapp_disk_type': 'FCAL'
      },
     {'pool_name': AGGREGATES[1],
+     'netapp_aggregate': AGGREGATES[1],
      'total_capacity_gb': 'unknown',
      'free_capacity_gb': 2.0,
      'allocated_capacity_gb': 0.0,
      'qos': 'False',
-     'reserved_percentage': 0,
+     'reserved_percentage': 5,
      'dedupe': [True, False],
      'compression': [True, False],
      'thin_provisioning': [True, False],
-     'netapp_raid_type': 'raid_dp',
-     'netapp_disk_type': 'SSD'
      },
 ]
 
-SSC_RAID_TYPES = {
-    AGGREGATES[0]: 'raid4',
-    AGGREGATES[1]: 'raid_dp'
-}
+SSC_AGGREGATES = [
+    {
+        'name': AGGREGATES[0],
+        'raid-type': 'raid4',
+        'is-hybrid': False,
+    },
+    {
+        'name': AGGREGATES[1],
+        'raid-type': 'raid_dp',
+        'is-hybrid': True,
+    },
+]
 
-SSC_DISK_TYPES = {
-    AGGREGATES[0]: 'FCAL',
-    AGGREGATES[1]: 'SSD'
-}
+SSC_DISK_TYPES = ['FCAL', ['SATA', 'SSD']]
 
 
 def get_config_cmode():
     config = na_fakes.create_configuration_cmode()
-    config.local_conf.set_override('share_backend_name', BACKEND_NAME)
+    config.local_conf.set_override('share_backend_name', BACKEND_NAME,
+                                   enforce_type=True)
+    config.reserved_share_percentage = 5
     config.netapp_login = CLIENT_KWARGS['username']
     config.netapp_password = CLIENT_KWARGS['password']
     config.netapp_server_hostname = CLIENT_KWARGS['hostname']

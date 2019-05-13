@@ -21,8 +21,7 @@ from oslo_log import log
 
 from manila.common import constants
 from manila import exception
-from manila.i18n import _
-from manila.i18n import _LW
+from manila.i18n import _, _LW
 from manila.share import api as share_api
 import manila.utils as utils
 
@@ -84,11 +83,12 @@ class ShareMigrationHelper(object):
             else:
                 time.sleep(tries ** 2)
 
-    def create_instance_and_wait(self, share, share_instance, host):
+    def create_instance_and_wait(self, share, dest_host, new_share_network_id,
+                                 new_az_id, new_share_type_id):
 
         new_share_instance = self.api.create_instance(
-            self.context, share, share_instance['share_network_id'],
-            host['host'])
+            self.context, share, new_share_network_id, dest_host,
+            new_az_id, share_type_id=new_share_type_id)
 
         # Wait for new_share_instance to become ready
         starttime = time.time()
@@ -103,14 +103,14 @@ class ShareMigrationHelper(object):
                 msg = _("Failed to create new share instance"
                         " (from %(share_id)s) on "
                         "destination host %(host_name)s") % {
-                    'share_id': share['id'], 'host_name': host['host']}
+                    'share_id': share['id'], 'host_name': dest_host}
                 self.cleanup_new_instance(new_share_instance)
                 raise exception.ShareMigrationFailed(reason=msg)
             elif now > deadline:
                 msg = _("Timeout creating new share instance "
                         "(from %(share_id)s) on "
                         "destination host %(host_name)s") % {
-                    'share_id': share['id'], 'host_name': host['host']}
+                    'share_id': share['id'], 'host_name': dest_host}
                 self.cleanup_new_instance(new_share_instance)
                 raise exception.ShareMigrationFailed(reason=msg)
             else:
@@ -132,42 +132,20 @@ class ShareMigrationHelper(object):
                         " migration for share %s."), self.share['id'])
 
     def cleanup_access_rules(self, share_instance, share_server, driver):
+
+        # NOTE(ganso): For the purpose of restoring the access rules, the share
+        # instance status must not be "MIGRATING", else they would be cast to
+        # read-only. We briefly change them to "INACTIVE" so they are restored
+        # and after cleanup finishes, the invoking method will set the status
+        # back to "AVAILABLE".
+        self.db.share_instance_update(self.context, share_instance['id'],
+                                      {'status': constants.STATUS_INACTIVE})
+
         try:
             self.revert_access_rules(share_instance, share_server, driver)
         except Exception:
             LOG.warning(_LW("Failed to cleanup access rules during generic"
                         " migration for share %s."), self.share['id'])
-
-    def change_to_read_only(self, share_instance, share_server,
-                            readonly_support, driver):
-
-        # NOTE(ganso): If the share does not allow readonly mode we
-        # should remove all access rules and prevent any access
-
-        rules = self.db.share_access_get_all_for_instance(
-            self.context, share_instance['id'])
-
-        if len(rules) > 0:
-
-            if readonly_support:
-
-                LOG.debug("Changing all of share %s access rules "
-                          "to read-only.", self.share['id'])
-
-                for rule in rules:
-                    rule['access_level'] = 'ro'
-
-                driver.update_access(self.context, share_instance, rules,
-                                     add_rules=[], delete_rules=[],
-                                     share_server=share_server)
-            else:
-
-                LOG.debug("Removing all access rules for migration of "
-                          "share %s." % self.share['id'])
-
-                driver.update_access(self.context, share_instance, [],
-                                     add_rules=[], delete_rules=rules,
-                                     share_server=share_server)
 
     def revert_access_rules(self, share_instance, share_server, driver):
 
@@ -194,8 +172,25 @@ class ShareMigrationHelper(object):
             LOG.debug("Restoring all of share %s access rules according to "
                       "DB.", self.share['id'])
 
+            # refresh share instance
+            new_share_instance = self.db.share_instance_get(
+                self.context, new_share_instance['id'], with_share_data=True)
+
             self.api.allow_access_to_instance(self.context, new_share_instance,
                                               rules)
             utils.wait_for_access_update(
                 self.context, self.db, new_share_instance,
                 self.migration_wait_access_rules_timeout)
+
+    @utils.retry(exception.ShareServerNotReady, retries=8)
+    def wait_for_share_server(self, share_server_id):
+        share_server = self.db.share_server_get(self.context, share_server_id)
+        if share_server['status'] == constants.STATUS_ERROR:
+            raise exception.ShareServerNotCreated(
+                share_server_id=share_server_id)
+        elif share_server['status'] == constants.STATUS_ACTIVE:
+            return share_server
+        else:
+            raise exception.ShareServerNotReady(
+                share_server_id=share_server_id, time=511,
+                state=constants.STATUS_AVAILABLE)

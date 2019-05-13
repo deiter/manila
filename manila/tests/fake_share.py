@@ -16,6 +16,7 @@
 import datetime
 import uuid
 
+from manila.api.openstack import api_version_request as api_version
 from manila.common import constants
 from manila.db.sqlalchemy import models
 from manila.tests.db import fakes as db_fakes
@@ -54,10 +55,15 @@ def fake_share_instance(base_share=None, **kwargs):
         'share_id': share['id'],
         'id': "fakeinstanceid",
         'status': "active",
+        'host': 'fakehost',
+        'share_network_id': 'fakesharenetworkid',
+        'share_server_id': 'fakeshareserverid',
     }
 
     for attr in models.ShareInstance._proxified_properties:
         share_instance[attr] = getattr(share, attr, None)
+
+    share_instance.update(kwargs)
 
     return db_fakes.FakeModel(share_instance)
 
@@ -89,7 +95,8 @@ def fake_snapshot(create_instance=False, **kwargs):
     instance_keys = ('instance_id', 'snapshot_id', 'share_instance_id',
                      'status', 'progress', 'provider_location')
     snapshot_keys = ('id', 'share_name', 'share_id', 'name', 'share_size',
-                     'share_proto', 'instance', 'aggregate_status')
+                     'share_proto', 'instance', 'aggregate_status', 'share',
+                     'project_id', 'size')
 
     instance_kwargs = {k: kwargs.get(k) for k in instance_keys if k in kwargs}
     snapshot_kwargs = {k: kwargs.get(k) for k in snapshot_keys if k in kwargs}
@@ -108,6 +115,9 @@ def fake_snapshot(create_instance=False, **kwargs):
         'instance': None,
         'share': 'fake_share',
         'aggregate_status': aggregate_status,
+        'project_id': 'fakeprojectid',
+        'size': 1,
+        'user_id': 'xyzzy',
     }
     snapshot.update(snapshot_kwargs)
     if create_instance:
@@ -120,6 +130,7 @@ def fake_snapshot(create_instance=False, **kwargs):
             snapshot['instance']['provider_location']
         )
         snapshot['progress'] = snapshot['instance']['progress']
+        snapshot['instances'] = snapshot['instance'],
     else:
         snapshot['status'] = constants.STATUS_AVAILABLE
         snapshot['progress'] = '0%'
@@ -129,7 +140,7 @@ def fake_snapshot(create_instance=False, **kwargs):
     return db_fakes.FakeModel(snapshot)
 
 
-def fake_snapshot_instance(base_snapshot=None, **kwargs):
+def fake_snapshot_instance(base_snapshot=None, as_primitive=False, **kwargs):
     if base_snapshot is None:
         base_snapshot = fake_snapshot()
     snapshot_instance = {
@@ -140,13 +151,22 @@ def fake_snapshot_instance(base_snapshot=None, **kwargs):
         'provider_location': 'i_live_here_actually',
         'share_name': 'fakename',
         'share_id': 'fakeshareinstanceid',
+        'share_instance': {'share_id': 'fakeshareid', },
         'share_instance_id': 'fakeshareinstanceid',
+        'deleted': False,
+        'updated_at': datetime.datetime(2016, 3, 21, 0, 5, 58),
+        'created_at': datetime.datetime(2016, 3, 21, 0, 5, 58),
+        'deleted_at': None,
+        'share': fake_share(),
     }
     snapshot_instance.update(kwargs)
-    return db_fakes.FakeModel(snapshot_instance)
+    if as_primitive:
+        return snapshot_instance
+    else:
+        return db_fakes.FakeModel(snapshot_instance)
 
 
-def expected_snapshot(id='fake_snapshot_id', **kwargs):
+def expected_snapshot(version=None, id='fake_snapshot_id', **kwargs):
     self_link = 'http://localhost/v1/fake/snapshots/%s' % id
     bookmark_link = 'http://localhost/fake/snapshots/%s' % id
     snapshot = {
@@ -170,6 +190,14 @@ def expected_snapshot(id='fake_snapshot_id', **kwargs):
             },
         ],
     }
+
+    if version and (api_version.APIVersionRequest(version)
+                    >= api_version.APIVersionRequest('2.17')):
+        snapshot.update({
+            'user_id': 'fakesnapuser',
+            'project_id': 'fakesnapproject',
+        })
+
     snapshot.update(kwargs)
     return {'snapshot': snapshot}
 

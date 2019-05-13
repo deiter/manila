@@ -21,7 +21,6 @@ from novaclient import client as nova_client
 from novaclient import exceptions as nova_exception
 from novaclient import utils
 from oslo_config import cfg
-from oslo_log import log
 import six
 
 from manila.common import client_auth
@@ -93,6 +92,11 @@ nova_opts = [
                 deprecated_group="DEFAULT",
                 deprecated_name="nova_api_insecure",
                 help='Allow to perform insecure SSL requests to nova.'),
+    cfg.StrOpt('endpoint_type',
+               default='publicURL',
+               help='Endpoint type to be used with nova client calls.'),
+    cfg.StrOpt('region_name',
+               help='Region name for connecting to nova.'),
     ]
 
 CONF = cfg.CONF
@@ -101,8 +105,6 @@ CONF.register_opts(core_opts)
 CONF.register_opts(nova_opts, NOVA_GROUP)
 ks_loading.register_session_conf_options(CONF, NOVA_GROUP)
 ks_loading.register_auth_conf_options(CONF, NOVA_GROUP)
-
-LOG = log.getLogger(__name__)
 
 
 def list_opts():
@@ -126,7 +128,9 @@ def novaclient(context):
     return AUTH_OBJ.get_client(context,
                                version=CONF[NOVA_GROUP].api_microversion,
                                insecure=CONF[NOVA_GROUP].api_insecure,
-                               cacert=CONF[NOVA_GROUP].ca_certificates_file)
+                               cacert=CONF[NOVA_GROUP].ca_certificates_file,
+                               endpoint_type=CONF[NOVA_GROUP].endpoint_type,
+                               region_name=CONF[NOVA_GROUP].region_name)
 
 
 def _untranslate_server_summary_view(server):

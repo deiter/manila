@@ -15,16 +15,12 @@
 Unit tests for Oracle's ZFSSA REST API.
 """
 import mock
-from oslo_log import log
 
 from manila import exception
 from manila.share.drivers.zfssa import restclient
 from manila.share.drivers.zfssa import zfssarest
 from manila import test
 from manila.tests import fake_zfssa
-
-
-LOG = log.getLogger(__name__)
 
 
 class ZFSSAApiTestCase(test.TestCase):
@@ -43,6 +39,12 @@ class ZFSSAApiTestCase(test.TestCase):
         _restclient.return_value = fake_zfssa.FakeRestClient()
         self._zfssa = zfssarest.ZFSSAApi()
         self._zfssa.set_host('fakehost')
+
+        self.schema = {
+            'property': 'manila_managed',
+            'description': 'Managed by Manila',
+            'type': 'Boolean',
+        }
 
     def _create_response(self, status):
         response = fake_zfssa.FakeResponse(status)
@@ -394,3 +396,37 @@ class ZFSSAApiTestCase(test.TestCase):
                                                     self.project,
                                                     self.share,
                                                     data1)
+
+    def test_create_schema_negative(self):
+        self.mock_object(self._zfssa.rclient, 'get')
+        self.mock_object(self._zfssa.rclient, 'post')
+        self._zfssa.rclient.post.return_value = self._create_response(
+            restclient.Status.NOT_FOUND)
+
+        self.assertRaises(exception.ShareBackendException,
+                          self._zfssa.create_schema,
+                          self.schema)
+
+    def test_create_schema_property_exists(self):
+        self.mock_object(self._zfssa.rclient, 'get')
+        self.mock_object(self._zfssa.rclient, 'post')
+        self._zfssa.rclient.get.return_value = self._create_response(
+            restclient.Status.OK)
+
+        self._zfssa.create_schema(self.schema)
+
+        self.assertEqual(1, self._zfssa.rclient.get.call_count)
+        self.assertEqual(0, self._zfssa.rclient.post.call_count)
+
+    def test_create_schema(self):
+        self.mock_object(self._zfssa.rclient, 'get')
+        self.mock_object(self._zfssa.rclient, 'post')
+        self._zfssa.rclient.get.return_value = self._create_response(
+            restclient.Status.NOT_FOUND)
+        self._zfssa.rclient.post.return_value = self._create_response(
+            restclient.Status.CREATED)
+
+        self._zfssa.create_schema(self.schema)
+
+        self.assertEqual(1, self._zfssa.rclient.get.call_count)
+        self.assertEqual(1, self._zfssa.rclient.post.call_count)

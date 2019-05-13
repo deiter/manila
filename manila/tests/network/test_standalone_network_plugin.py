@@ -124,7 +124,8 @@ class StandaloneNetworkPluginTest(test.TestCase):
             ['2001:cdba::3257:9652/48'], instance.allowed_cidrs)
         self.assertEqual(
             ('2001:cdba::', '2001:cdba::3257:9652',
-             '2001:cdba:0:ffff:ffff:ffff:ffff:ffff'),
+             netaddr.IPAddress('2001:cdba:0:ffff:ffff:ffff:ffff:ffff').format()
+             ),
             instance.reserved_addresses)
 
     @ddt.data('custom_config_group_name', 'DEFAULT')
@@ -308,7 +309,10 @@ class StandaloneNetworkPluginTest(test.TestCase):
         instance.db.share_network_update.assert_called_once_with(
             fake_context, fake_share_network['id'],
             dict(network_type=None, segmentation_id=None,
-                 cidr=six.text_type(instance.net.cidr), ip_version=4))
+                 cidr=six.text_type(instance.net.cidr),
+                 gateway=six.text_type(instance.gateway),
+                 ip_version=4,
+                 mtu=1500))
 
     def test_allocate_network_zero_addresses_ipv6(self):
         data = {
@@ -329,7 +333,10 @@ class StandaloneNetworkPluginTest(test.TestCase):
         instance.db.share_network_update.assert_called_once_with(
             fake_context, fake_share_network['id'],
             dict(network_type=None, segmentation_id=None,
-                 cidr=six.text_type(instance.net.cidr), ip_version=6))
+                 cidr=six.text_type(instance.net.cidr),
+                 gateway=six.text_type(instance.gateway),
+                 ip_version=6,
+                 mtu=1500))
 
     def test_allocate_network_one_ip_address_ipv4_no_usages_exist(self):
         data = {
@@ -356,7 +363,9 @@ class StandaloneNetworkPluginTest(test.TestCase):
             'network_type': 'vlan',
             'segmentation_id': 1003,
             'cidr': '10.0.0.0/24',
+            'gateway': '10.0.0.1',
             'ip_version': 4,
+            'mtu': 1500,
         }
         instance.db.share_network_update.assert_called_once_with(
             fake_context, fake_share_network['id'], na_data)
@@ -400,7 +409,9 @@ class StandaloneNetworkPluginTest(test.TestCase):
             'network_type': None,
             'segmentation_id': None,
             'cidr': six.text_type(instance.net.cidr),
+            'gateway': six.text_type(instance.gateway),
             'ip_version': 4,
+            'mtu': 1500,
         }
         instance.db.share_network_update.assert_called_once_with(
             ctxt, fake_share_network['id'], dict(**na_data))
@@ -443,6 +454,9 @@ class StandaloneNetworkPluginTest(test.TestCase):
         instance.db.share_network_update.assert_called_once_with(
             fake_context, fake_share_network['id'],
             dict(network_type=None, segmentation_id=None,
-                 cidr=six.text_type(instance.net.cidr), ip_version=4))
+                 cidr=six.text_type(instance.net.cidr),
+                 gateway=six.text_type(instance.gateway),
+                 ip_version=4,
+                 mtu=1500))
         instance.db.network_allocations_get_by_ip_address.assert_has_calls(
             [mock.call(fake_context, '10.0.0.2')])

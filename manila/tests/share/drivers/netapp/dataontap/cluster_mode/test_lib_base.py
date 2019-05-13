@@ -41,7 +41,12 @@ from manila.share.drivers.netapp import utils as na_utils
 from manila.share import share_types
 from manila.share import utils as share_utils
 from manila import test
+from manila.tests import fake_share
 from manila.tests.share.drivers.netapp.dataontap import fakes as fake
+
+
+def fake_replica(**kwargs):
+    return fake_share.fake_replica(for_manager=True, **kwargs)
 
 
 @ddt.ddt
@@ -340,8 +345,6 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
             'driver_version': '1.0',
             'netapp_storage_family': 'ontap_cluster',
             'storage_protocol': 'NFS_CIFS',
-            'total_capacity_gb': 0.0,
-            'free_capacity_gb': 0.0,
             'consistency_group_support': 'host',
             'pools': fake.POOLS,
         }
@@ -363,8 +366,6 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
             'driver_version': '1.0',
             'netapp_storage_family': 'ontap_cluster',
             'storage_protocol': 'NFS_CIFS',
-            'total_capacity_gb': 0.0,
-            'free_capacity_gb': 0.0,
             'consistency_group_support': 'host',
             'replication_type': 'dr',
             'replication_domain': 'fake_domain',
@@ -382,27 +383,28 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
 
         self.assertListEqual(fake.POOLS, result)
 
-    @ddt.data(
-        {
-            'capacities': fake.AGGREGATE_CAPACITIES,
-            'pools': fake.POOLS,
-        },
-        {
-            'capacities': fake.AGGREGATE_CAPACITIES_VSERVER_CREDS,
-            'pools': fake.POOLS_VSERVER_CREDS
-        }
-    )
-    @ddt.unpack
-    def test_get_pools(self, capacities, pools):
+    def test_get_pools(self):
 
-        self.mock_object(self.library,
-                         '_get_aggregate_space',
-                         mock.Mock(return_value=capacities))
+        self.mock_object(
+            self.library, '_get_aggregate_space',
+            mock.Mock(return_value=fake.AGGREGATE_CAPACITIES))
+        self.library._have_cluster_creds = True
         self.library._ssc_stats = fake.SSC_INFO
 
         result = self.library._get_pools()
 
-        self.assertListEqual(pools, result)
+        self.assertListEqual(fake.POOLS, result)
+
+    def test_get_pools_vserver_creds(self):
+
+        self.mock_object(
+            self.library, '_get_aggregate_space',
+            mock.Mock(return_value=fake.AGGREGATE_CAPACITIES_VSERVER_CREDS))
+        self.library._have_cluster_creds = False
+
+        result = self.library._get_pools()
+
+        self.assertListEqual(fake.POOLS_VSERVER_CREDS, result)
 
     def test_handle_ems_logging(self):
 
@@ -600,14 +602,9 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
             return_value=fake.SHARE_NAME))
         self.mock_object(share_utils, 'extract_host', mock.Mock(
             return_value=fake.POOL_NAME))
-        self.mock_object(share_types, 'get_extra_specs_from_share',
-                         mock.Mock(return_value=fake.EXTRA_SPEC))
-        mock_remap_standard_boolean_extra_specs = self.mock_object(
-            self.library, '_remap_standard_boolean_extra_specs',
-            mock.Mock(return_value=fake.EXTRA_SPEC))
-        self.mock_object(self.library, '_check_boolean_extra_specs_validity')
-        self.mock_object(self.library, '_get_boolean_provisioning_options',
-                         mock.Mock(return_value=fake.PROVISIONING_OPTIONS))
+        self.mock_object(
+            self.library, '_get_provisioning_options_for_share',
+            mock.Mock(return_value=copy.deepcopy(fake.PROVISIONING_OPTIONS)))
         vserver_client = mock.Mock()
 
         self.library._allocate_container(fake.EXTRA_SPEC_SHARE,
@@ -616,10 +613,8 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         vserver_client.create_volume.assert_called_once_with(
             fake.POOL_NAME, fake.SHARE_NAME, fake.SHARE['size'],
             thin_provisioned=True, snapshot_policy='default',
-            language='en-US', dedup_enabled=True,
+            language='en-US', dedup_enabled=True, split=True,
             compression_enabled=False, max_files=5000, snapshot_reserve=8)
-        mock_remap_standard_boolean_extra_specs.assert_called_once_with(
-            fake.EXTRA_SPEC)
 
     def test_remap_standard_boolean_extra_specs(self):
 
@@ -634,12 +629,9 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
             return_value=fake.SHARE_NAME))
         self.mock_object(share_utils, 'extract_host', mock.Mock(
             return_value=fake.POOL_NAME))
-        self.mock_object(share_types, 'get_extra_specs_from_share',
-                         mock.Mock(return_value=fake.EXTRA_SPEC))
-
-        self.mock_object(self.library, '_check_boolean_extra_specs_validity')
-        self.mock_object(self.library, '_get_boolean_provisioning_options',
-                         mock.Mock(return_value=fake.PROVISIONING_OPTIONS))
+        self.mock_object(
+            self.library, '_get_provisioning_options_for_share',
+            mock.Mock(return_value=copy.deepcopy(fake.PROVISIONING_OPTIONS)))
         vserver_client = mock.Mock()
 
         self.library._allocate_container(fake.EXTRA_SPEC_SHARE,
@@ -648,7 +640,7 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         vserver_client.create_volume.assert_called_once_with(
             fake.POOL_NAME, fake.SHARE_NAME, fake.SHARE['size'],
             thin_provisioned=True, snapshot_policy='default',
-            language='en-US', dedup_enabled=True,
+            language='en-US', dedup_enabled=True, split=True,
             compression_enabled=False, max_files=5000,
             snapshot_reserve=8, volume_type='dp')
 
@@ -732,6 +724,32 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
             fake.EXTRA_SPEC_SHARE, fake.INVALID_EXTRA_SPEC_COMBO,
             list(self.library.BOOLEAN_QUALIFIED_EXTRA_SPECS_MAP))
 
+    def test_get_provisioning_options_for_share(self):
+
+        mock_get_extra_specs_from_share = self.mock_object(
+            share_types, 'get_extra_specs_from_share',
+            mock.Mock(return_value=fake.EXTRA_SPEC))
+        mock_remap_standard_boolean_extra_specs = self.mock_object(
+            self.library, '_remap_standard_boolean_extra_specs',
+            mock.Mock(return_value=fake.EXTRA_SPEC))
+        mock_check_extra_specs_validity = self.mock_object(
+            self.library, '_check_extra_specs_validity')
+        mock_get_provisioning_options = self.mock_object(
+            self.library, '_get_provisioning_options',
+            mock.Mock(return_value=fake.PROVISIONING_OPTIONS))
+
+        result = self.library._get_provisioning_options_for_share(
+            fake.EXTRA_SPEC_SHARE)
+
+        self.assertEqual(fake.PROVISIONING_OPTIONS, result)
+        mock_get_extra_specs_from_share.assert_called_once_with(
+            fake.EXTRA_SPEC_SHARE)
+        mock_remap_standard_boolean_extra_specs.assert_called_once_with(
+            fake.EXTRA_SPEC)
+        mock_check_extra_specs_validity.assert_called_once_with(
+            fake.EXTRA_SPEC_SHARE, fake.EXTRA_SPEC)
+        mock_get_provisioning_options.assert_called_once_with(fake.EXTRA_SPEC)
+
     def test_get_provisioning_options(self):
         result = self.library._get_provisioning_options(fake.EXTRA_SPEC)
 
@@ -755,6 +773,7 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
             'thin_provisioned': False,
             'compression_enabled': False,
             'dedup_enabled': False,
+            'split': False,
         }
 
         self.assertEqual(expected, result)
@@ -778,6 +797,7 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
             'thin_provisioned': False,
             'dedup_enabled': False,
             'compression_enabled': False,
+            'split': False,
         }
 
         result = self.library._get_boolean_provisioning_options(
@@ -849,23 +869,31 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
                           fake.AGGREGATES[1],
                           fake.EXTRA_SPEC)
 
-    def test_allocate_container_from_snapshot(self):
+    @ddt.data(None, 'fake_location')
+    def test_allocate_container_from_snapshot(self, provider_location):
 
+        self.mock_object(
+            self.library, '_get_provisioning_options_for_share',
+            mock.Mock(return_value=copy.deepcopy(fake.PROVISIONING_OPTIONS)))
         vserver_client = mock.Mock()
 
+        fake_snapshot = copy.deepcopy(fake.SNAPSHOT)
+        fake_snapshot['provider_location'] = provider_location
+
         self.library._allocate_container_from_snapshot(fake.SHARE,
-                                                       fake.SNAPSHOT,
+                                                       fake_snapshot,
                                                        vserver_client)
 
         share_name = self.library._get_backend_share_name(fake.SHARE['id'])
         parent_share_name = self.library._get_backend_share_name(
             fake.SNAPSHOT['share_id'])
         parent_snapshot_name = self.library._get_backend_snapshot_name(
-            fake.SNAPSHOT['id'])
+            fake.SNAPSHOT['id']) if not provider_location else 'fake_location'
         vserver_client.create_volume_clone.assert_called_once_with(
-            share_name,
-            parent_share_name,
-            parent_snapshot_name)
+            share_name, parent_share_name, parent_snapshot_name,
+            thin_provisioned=True, snapshot_policy='default',
+            language='en-US', dedup_enabled=True, split=True,
+            compression_enabled=False, max_files=5000)
 
     def test_share_exists(self):
 
@@ -1455,6 +1483,8 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         vserver_client.volume_has_luns = mock.Mock(return_value=False)
         vserver_client.volume_has_junctioned_volumes = mock.Mock(
             return_value=False)
+        vserver_client.volume_has_snapmirror_relationships = mock.Mock(
+            return_value=False)
 
         result = self.library._validate_volume_for_manage(
             fake.FLEXVOL_TO_MANAGE, vserver_client)
@@ -1478,6 +1508,8 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         vserver_client.volume_has_luns = mock.Mock(return_value=False)
         vserver_client.volume_has_junctioned_volumes = mock.Mock(
             return_value=False)
+        vserver_client.volume_has_snapmirror_relationships = mock.Mock(
+            return_value=False)
 
         self.assertRaises(exception.ManageInvalidShare,
                           self.library._validate_volume_for_manage,
@@ -1489,6 +1521,8 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         vserver_client = mock.Mock()
         vserver_client.volume_has_luns = mock.Mock(return_value=True)
         vserver_client.volume_has_junctioned_volumes = mock.Mock(
+            return_value=False)
+        vserver_client.volume_has_snapmirror_relationships = mock.Mock(
             return_value=False)
 
         self.assertRaises(exception.ManageInvalidShare,
@@ -1502,6 +1536,114 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         vserver_client.volume_has_luns = mock.Mock(return_value=False)
         vserver_client.volume_has_junctioned_volumes = mock.Mock(
             return_value=True)
+        vserver_client.volume_has_snapmirror_relationships = mock.Mock(
+            return_value=False)
+
+        self.assertRaises(exception.ManageInvalidShare,
+                          self.library._validate_volume_for_manage,
+                          fake.FLEXVOL_TO_MANAGE,
+                          vserver_client)
+
+    def test_manage_existing_snapshot(self):
+
+        vserver_client = mock.Mock()
+        mock_get_vserver = self.mock_object(
+            self.library, '_get_vserver',
+            mock.Mock(return_value=(fake.VSERVER1, vserver_client)))
+        vserver_client.get_volume.return_value = fake.FLEXVOL_TO_MANAGE
+        vserver_client.volume_has_snapmirror_relationships.return_value = False
+        result = self.library.manage_existing_snapshot(
+            fake.SNAPSHOT_TO_MANAGE, {})
+
+        share_name = self.library._get_backend_share_name(
+            fake.SNAPSHOT['share_id'])
+        new_snapshot_name = self.library._get_backend_snapshot_name(
+            fake.SNAPSHOT['id'])
+        mock_get_vserver.assert_called_once_with(share_server=None)
+        (vserver_client.volume_has_snapmirror_relationships.
+            assert_called_once_with(fake.FLEXVOL_TO_MANAGE))
+        vserver_client.rename_snapshot.assert_called_once_with(
+            share_name, fake.SNAPSHOT_NAME, new_snapshot_name)
+        self.library.private_storage.update.assert_called_once_with(
+            fake.SNAPSHOT['id'], {'original_name': fake.SNAPSHOT_NAME})
+        self.assertEqual({'size': 2, 'provider_location': new_snapshot_name},
+                         result)
+
+    def test_manage_existing_snapshot_no_snapshot_name(self):
+
+        vserver_client = mock.Mock()
+        self.mock_object(self.library,
+                         '_get_vserver',
+                         mock.Mock(return_value=(fake.VSERVER1,
+                                                 vserver_client)))
+        vserver_client.get_volume.return_value = fake.FLEXVOL_TO_MANAGE
+        vserver_client.volume_has_snapmirror_relationships.return_value = False
+        fake_snapshot = copy.deepcopy(fake.SNAPSHOT_TO_MANAGE)
+        fake_snapshot['provider_location'] = ''
+
+        self.assertRaises(exception.ManageInvalidShareSnapshot,
+                          self.library.manage_existing_snapshot,
+                          fake_snapshot, {})
+
+    @ddt.data(netapp_api.NaApiError,
+              exception.NetAppException)
+    def test_manage_existing_snapshot_get_volume_error(self, exception_type):
+
+        vserver_client = mock.Mock()
+        self.mock_object(self.library,
+                         '_get_vserver',
+                         mock.Mock(return_value=(fake.VSERVER1,
+                                                 vserver_client)))
+        vserver_client.get_volume.side_effect = exception_type
+        self.mock_object(self.client,
+                         'volume_has_snapmirror_relationships',
+                         mock.Mock(return_value=False))
+
+        self.assertRaises(exception.ShareNotFound,
+                          self.library.manage_existing_snapshot,
+                          fake.SNAPSHOT_TO_MANAGE, {})
+
+    def test_manage_existing_snapshot_mirrors_present(self):
+
+        vserver_client = mock.Mock()
+        self.mock_object(self.library,
+                         '_get_vserver',
+                         mock.Mock(return_value=(fake.VSERVER1,
+                                                 vserver_client)))
+        vserver_client.get_volume.return_value = fake.FLEXVOL_TO_MANAGE
+        vserver_client.volume_has_snapmirror_relationships.return_value = True
+
+        self.assertRaises(exception.ManageInvalidShareSnapshot,
+                          self.library.manage_existing_snapshot,
+                          fake.SNAPSHOT_TO_MANAGE, {})
+
+    def test_manage_existing_snapshot_rename_snapshot_error(self):
+
+        vserver_client = mock.Mock()
+        self.mock_object(self.library,
+                         '_get_vserver',
+                         mock.Mock(return_value=(fake.VSERVER1,
+                                                 vserver_client)))
+        vserver_client.get_volume.return_value = fake.FLEXVOL_TO_MANAGE
+        vserver_client.volume_has_snapmirror_relationships.return_value = False
+        vserver_client.rename_snapshot.side_effect = netapp_api.NaApiError
+
+        self.assertRaises(exception.ManageInvalidShareSnapshot,
+                          self.library.manage_existing_snapshot,
+                          fake.SNAPSHOT_TO_MANAGE, {})
+
+    def test_unmanage_snapshot(self):
+
+        result = self.library.unmanage_snapshot(fake.SNAPSHOT)
+
+        self.assertIsNone(result)
+
+    def test_validate_volume_for_manage_snapmirror_relationships_present(self):
+
+        vserver_client = mock.Mock()
+        vserver_client.volume_has_luns.return_value = False
+        vserver_client.volume_has_junctioned_volumes.return_value = False
+        vserver_client.volume_has_snapmirror_relationships.return_value = True
 
         self.assertRaises(exception.ManageInvalidShare,
                           self.library._validate_volume_for_manage,
@@ -2030,35 +2172,58 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
     def test_update_ssc_aggr_info(self):
 
         self.library._have_cluster_creds = True
-        self.mock_object(self.client,
-                         'get_aggregate_raid_types',
-                         mock.Mock(return_value=fake.SSC_RAID_TYPES))
-        self.mock_object(self.client,
-                         'get_aggregate_disk_types',
-                         mock.Mock(return_value=fake.SSC_DISK_TYPES))
+        mock_get_aggregate = self.mock_object(
+            self.client, 'get_aggregate',
+            mock.Mock(side_effect=fake.SSC_AGGREGATES))
+        mock_get_aggregate_disk_types = self.mock_object(
+            self.client, 'get_aggregate_disk_types',
+            mock.Mock(side_effect=fake.SSC_DISK_TYPES))
         ssc_stats = {
             fake.AGGREGATES[0]: {},
-            fake.AGGREGATES[1]: {}
+            fake.AGGREGATES[1]: {},
         }
 
         self.library._update_ssc_aggr_info(fake.AGGREGATES, ssc_stats)
 
         self.assertDictEqual(fake.SSC_INFO, ssc_stats)
+        mock_get_aggregate.assert_has_calls([
+            mock.call(fake.AGGREGATES[0]),
+            mock.call(fake.AGGREGATES[1]),
+        ])
+        mock_get_aggregate_disk_types.assert_has_calls([
+            mock.call(fake.AGGREGATES[0]),
+            mock.call(fake.AGGREGATES[1]),
+        ])
 
     def test_update_ssc_aggr_info_not_found(self):
 
         self.library._have_cluster_creds = True
         self.mock_object(self.client,
-                         'get_aggregate_raid_types',
+                         'get_aggregate',
                          mock.Mock(return_value={}))
         self.mock_object(self.client,
                          'get_aggregate_disk_types',
-                         mock.Mock(return_value={}))
-        ssc_stats = {}
+                         mock.Mock(return_value=None))
+        ssc_stats = {
+            fake.AGGREGATES[0]: {},
+            fake.AGGREGATES[1]: {},
+        }
 
         self.library._update_ssc_aggr_info(fake.AGGREGATES, ssc_stats)
 
-        self.assertDictEqual({}, ssc_stats)
+        expected = {
+            fake.AGGREGATES[0]: {
+                'netapp_raid_type': None,
+                'netapp_disk_type': None,
+                'netapp_hybrid_aggregate': None,
+            },
+            fake.AGGREGATES[1]: {
+                'netapp_raid_type': None,
+                'netapp_disk_type': None,
+                'netapp_hybrid_aggregate': None,
+            }
+        }
+        self.assertDictEqual(expected, ssc_stats)
 
     def test_update_ssc_aggr_info_no_cluster_creds(self):
 
@@ -2123,6 +2288,16 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
             fake.BACKEND_NAME, vserver_name=fake.VSERVER1)
 
     def test_delete_replica(self):
+
+        active_replica = fake_replica(
+            replica_state=constants.REPLICA_STATE_ACTIVE)
+        replica_1 = fake_replica(
+            replica_state=constants.REPLICA_STATE_IN_SYNC,
+            host=fake.MANILA_HOST_NAME)
+        replica_2 = fake_replica(
+            replica_state=constants.REPLICA_STATE_OUT_OF_SYNC)
+        replica_list = [active_replica, replica_1, replica_2]
+
         self.mock_object(self.library,
                          '_deallocate_container',
                          mock.Mock())
@@ -2137,19 +2312,30 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
                          mock.Mock(return_value=fake.VSERVER1))
 
         result = self.library.delete_replica(None,
-                                             [fake.SHARE],
-                                             fake.SHARE,
+                                             replica_list,
+                                             replica_1,
                                              [],
                                              share_server=None)
-        self.assertEqual(None, result)
-        mock_dm_session.delete_snapmirror.assert_called_with(fake.SHARE,
-                                                             fake.SHARE)
-        self.assertEqual(2, mock_dm_session.delete_snapmirror.call_count)
+        self.assertIsNone(result)
+        mock_dm_session.delete_snapmirror.assert_has_calls([
+            mock.call(active_replica, replica_1),
+            mock.call(replica_2, replica_1),
+            mock.call(replica_1, replica_2),
+            mock.call(replica_1, active_replica)],
+            any_order=True)
+        self.assertEqual(4, mock_dm_session.delete_snapmirror.call_count)
         data_motion.get_client_for_backend.assert_called_with(
             fake.BACKEND_NAME, vserver_name=mock.ANY)
         self.assertEqual(1, data_motion.get_client_for_backend.call_count)
 
     def test_delete_replica_with_share_server(self):
+
+        active_replica = fake_replica(
+            replica_state=constants.REPLICA_STATE_ACTIVE)
+        replica = fake_replica(replica_state=constants.REPLICA_STATE_IN_SYNC,
+                               host=fake.MANILA_HOST_NAME)
+        replica_list = [active_replica, replica]
+
         self.mock_object(self.library,
                          '_deallocate_container',
                          mock.Mock())
@@ -2164,18 +2350,25 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
                          mock.Mock(return_value=fake.VSERVER1))
 
         result = self.library.delete_replica(None,
-                                             [fake.SHARE],
-                                             fake.SHARE,
+                                             replica_list,
+                                             replica,
                                              [],
                                              share_server=fake.SHARE_SERVER)
-        self.assertEqual(None, result)
-        mock_dm_session.delete_snapmirror.assert_called_with(fake.SHARE,
-                                                             fake.SHARE)
-        self.assertEqual(2, mock_dm_session.delete_snapmirror.call_count)
+        self.assertIsNone(result)
+        mock_dm_session.delete_snapmirror.assert_has_calls([
+            mock.call(active_replica, replica),
+            mock.call(replica, active_replica)],
+            any_order=True)
         data_motion.get_client_for_backend.assert_called_once_with(
             fake.BACKEND_NAME, vserver_name=fake.VSERVER1)
 
     def test_delete_replica_share_absent_on_backend(self):
+        active_replica = fake_replica(
+            replica_state=constants.REPLICA_STATE_ACTIVE)
+        replica = fake_replica(replica_state=constants.REPLICA_STATE_IN_SYNC,
+                               host=fake.MANILA_HOST_NAME)
+        replica_list = [active_replica, replica]
+
         self.mock_object(self.library,
                          '_deallocate_container',
                          mock.Mock())
@@ -2192,16 +2385,17 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
                          mock.Mock(return_value=fake.VSERVER1))
 
         result = self.library.delete_replica(None,
-                                             [fake.SHARE],
-                                             fake.SHARE,
+                                             replica_list,
+                                             replica,
                                              [],
                                              share_server=None)
 
-        self.assertEqual(None, result)
+        self.assertIsNone(result)
         self.assertFalse(self.library._deallocate_container.called)
-        mock_dm_session.delete_snapmirror.assert_called_with(fake.SHARE,
-                                                             fake.SHARE)
-        self.assertEqual(2, mock_dm_session.delete_snapmirror.call_count)
+        mock_dm_session.delete_snapmirror.assert_has_calls([
+            mock.call(active_replica, replica),
+            mock.call(replica, active_replica)],
+            any_order=True)
         data_motion.get_client_for_backend.assert_called_with(
             fake.BACKEND_NAME, vserver_name=mock.ANY)
         self.assertEqual(1, data_motion.get_client_for_backend.call_count)
@@ -3182,7 +3376,7 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         model_update = self.library.update_replicated_snapshot(
             replica_list, self.fake_replica_2, [fake_snapshot], fake_snapshot)
 
-        self.assertEqual(None, model_update)
+        self.assertIsNone(model_update)
         self.mock_dm_session.update_snapmirror.assert_called_once_with(
             self.fake_replica, self.fake_replica_2
         )
@@ -3206,7 +3400,7 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         model_update = self.library.update_replicated_snapshot(
             replica_list, self.fake_replica_2, [fake_snapshot], fake_snapshot)
 
-        self.assertEqual(None, model_update)
+        self.assertIsNone(model_update)
         self.mock_dm_session.update_snapmirror.assert_called_once_with(
             self.fake_replica, self.fake_replica_2
         )
@@ -3232,7 +3426,7 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         model_update = self.library.update_replicated_snapshot(
             replica_list, self.fake_replica_2, [fake_snapshot], fake_snapshot)
 
-        self.assertEqual(None, model_update)
+        self.assertIsNone(model_update)
         self.mock_dm_session.update_snapmirror.assert_called_once_with(
             self.fake_replica, self.fake_replica_2
         )
@@ -3280,7 +3474,7 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         model_update = self.library.update_replicated_snapshot(
             replica_list, self.fake_replica, [fake_snapshot], fake_snapshot)
 
-        self.assertEqual(None, model_update)
+        self.assertIsNone(model_update)
 
     def test_update_replicated_snapshot_created(self):
         vserver_client = mock.Mock()
@@ -3364,4 +3558,4 @@ class NetAppFileStorageLibraryTestCase(test.TestCase):
         model_update = self.library.update_replicated_snapshot(
             replica_list, self.fake_replica, [fake_snapshot], fake_snapshot)
 
-        self.assertEqual(None, model_update)
+        self.assertIsNone(model_update)

@@ -31,8 +31,7 @@ Requirements
   installed.
 * For ZFS hosts that support replication:
    * SSH access for each other should be passwordless.
-   * IP used for share exports should be available by ZFS hosts for each other.
-   * Username should be the same for accessing each of ZFS hosts.
+   * Service IP addresses should be available by ZFS hosts for each other.
 
 Supported Operations
 --------------------
@@ -41,17 +40,22 @@ The following operations are supported:
 
 * Create NFS Share
 * Delete NFS Share
+* Manage NFS Share
+* Unmanage NFS Share
 * Allow NFS Share access
    * Only IP access type is supported for NFS
    * Both access levels are supported - 'RW' and 'RO'
 * Deny NFS Share access
 * Create snapshot
 * Delete snapshot
+* Manage snapshot
+* Unmanage snapshot
 * Create share from snapshot
 * Extend share
 * Shrink share
 * Replication (experimental):
    * Create/update/delete/promote replica operations are supported
+* Share migration (experimental)
 
 Possibilities
 -------------
@@ -65,6 +69,10 @@ Possibilities
   So, status 'in_sync' means latest sync was successful.
   Time range between syncs equals to value of
   config global opt 'replica_state_update_interval'.
+* Driver is able to use qualified extra spec 'zfsonlinux:compression'.
+  It can contain any value that is supported by used ZFS app.
+  But if it is disabled via config option with value 'compression=off',
+  then it will not be used.
 
 Restrictions
 ------------
@@ -76,16 +84,12 @@ The ZFSonLinux share driver has the following restrictions:
 * 'Promote share replica' operation will switch roles of
   current 'secondary' replica and 'active'. It does not make more than
   one active replica available.
-* 'Manage share' operation is not yet implemented.
 * 'SaMBa' based sharing is not yet implemented.
+* 'Thick provisioning' is not yet implemented.
 
 Known problems
 --------------
 
-* Better to avoid usage of Neutron on the same node where ZFS is installed.
-  It leads to bug - https://bugs.launchpad.net/neutron/+bug/1546723
-  The ZFSonLinux share driver has workaround for it and requires 'nsenter' be
-  installed on the system where ZFS is installed.
 * 'Promote share replica' operation will make ZFS filesystem that became
   secondary as RO only on NFS level. On ZFS level system will
   stay mounted as was - RW.
@@ -130,6 +134,9 @@ for the ZFSonLinux driver:
 * zfs_replica_snapshot_prefix = <prefix>
    * Prefix to be used in dataset snapshot names that are created
      by 'update replica' operation.
+* zfs_migration_snapshot_prefix = <prefix>
+   * Prefix to be used in dataset snapshot names that are created
+     for 'migration' operation.
 
 Restart of :term:`manila-share` service is needed for the configuration
 changes to take effect.

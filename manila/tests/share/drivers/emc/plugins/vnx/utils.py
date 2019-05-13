@@ -17,11 +17,8 @@ import doctest
 
 from lxml import doctestcompare
 import mock
-from oslo_log import log
 import six
 
-
-LOG = log.getLogger(__name__)
 
 CHECKER = doctestcompare.LXMLOutputChecker()
 PARSE_XML = doctest.register_optionflag('PARSE_XML')
@@ -153,3 +150,9 @@ class EMCNFSShareMock(mock.Mock):
                     return False
 
         return True
+
+
+def patch_get_managed_ports(*arg, **kwargs):
+    return mock.patch('manila.share.drivers.emc.plugins.vnx.connection.'
+                      'VNXStorageConnection.get_managed_ports',
+                      mock.Mock(*arg, **kwargs))

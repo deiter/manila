@@ -21,8 +21,7 @@ from oslo_config import cfg
 from oslo_log import log
 
 from manila import exception
-from manila.i18n import _
-from manila.i18n import _LW
+from manila.i18n import _, _LW
 
 CONF = cfg.CONF
 LOG = log.getLogger(__name__)
@@ -79,7 +78,7 @@ class AuthClientLoader(object):
             CONF, self.group)
 
         if self.deprecated_opts_for_v2 and not self.auth_plugin:
-            LOG.warn(_LW("Not specifying auth options is deprecated"))
+            LOG.warning(_LW("Not specifying auth options is deprecated"))
             self.auth_plugin = v2.Password().load_from_options(
                 **self.deprecated_opts_for_v2)
 

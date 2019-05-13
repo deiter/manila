@@ -62,6 +62,7 @@ class NetAppCmodeFileStorageLibrary(object):
         'netapp:thin_provisioned': 'thin_provisioned',
         'netapp:dedup': 'dedup_enabled',
         'netapp:compression': 'compression_enabled',
+        'netapp:split_clone_on_create': 'split',
     }
     STRING_QUALIFIED_EXTRA_SPECS_MAP = {
         'netapp:snapshot_policy': 'snapshot_policy',
@@ -224,8 +225,6 @@ class NetAppCmodeFileStorageLibrary(object):
             'driver_version': '1.0',
             'netapp_storage_family': 'ontap_cluster',
             'storage_protocol': 'NFS_CIFS',
-            'total_capacity_gb': 0.0,
-            'free_capacity_gb': 0.0,
             'consistency_group_support': 'host',
             'pools': self._get_pools(),
         }
@@ -258,6 +257,8 @@ class NetAppCmodeFileStorageLibrary(object):
 
         for aggr_name in sorted(aggr_space.keys()):
 
+            reserved_percentage = self.configuration.reserved_share_percentage
+
             total_capacity_gb = na_utils.round_down(float(
                 aggr_space[aggr_name].get('total', 0)) / units.Gi, '0.01')
             free_capacity_gb = na_utils.round_down(float(
@@ -274,10 +275,11 @@ class NetAppCmodeFileStorageLibrary(object):
                 'free_capacity_gb': free_capacity_gb,
                 'allocated_capacity_gb': allocated_capacity_gb,
                 'qos': 'False',
-                'reserved_percentage': 0,
+                'reserved_percentage': reserved_percentage,
                 'dedupe': [True, False],
                 'compression': [True, False],
                 'thin_provisioning': [True, False],
+                'netapp_aggregate': aggr_name,
             }
 
             # Add storage service catalog data.
@@ -389,10 +391,8 @@ class NetAppCmodeFileStorageLibrary(object):
             msg = _("Pool is not available in the share host field.")
             raise exception.InvalidHost(reason=msg)
 
-        extra_specs = share_types.get_extra_specs_from_share(share)
-        extra_specs = self._remap_standard_boolean_extra_specs(extra_specs)
-        self._check_extra_specs_validity(share, extra_specs)
-        provisioning_options = self._get_provisioning_options(extra_specs)
+        provisioning_options = self._get_provisioning_options_for_share(share)
+
         if replica:
             # If this volume is intended to be a replication destination,
             # create it as the 'data-protection' type
@@ -527,6 +527,20 @@ class NetAppCmodeFileStorageLibrary(object):
         return dict(zip(provisioning_args, provisioning_values))
 
     @na_utils.trace
+    def _get_provisioning_options_for_share(self, share):
+        """Return provisioning options from a share.
+
+        Starting with a share, this method gets the extra specs, rationalizes
+        NetApp vs. standard extra spec values, ensures their validity, and
+        returns them in a form suitable for passing to various API client
+        methods.
+        """
+        extra_specs = share_types.get_extra_specs_from_share(share)
+        extra_specs = self._remap_standard_boolean_extra_specs(extra_specs)
+        self._check_extra_specs_validity(share, extra_specs)
+        return self._get_provisioning_options(extra_specs)
+
+    @na_utils.trace
     def _get_provisioning_options(self, specs):
         """Return a merged result of string and binary provisioning options."""
         boolean_args = self._get_boolean_provisioning_options(
@@ -566,9 +580,13 @@ class NetAppCmodeFileStorageLibrary(object):
             parent_snapshot_name = snapshot_name_func(self, snapshot['id'])
         else:
             parent_snapshot_name = snapshot['provider_location']
+
+        provisioning_options = self._get_provisioning_options_for_share(share)
+
         LOG.debug('Creating share from snapshot %s', snapshot['id'])
         vserver_client.create_volume_clone(share_name, parent_share_name,
-                                           parent_snapshot_name)
+                                           parent_snapshot_name,
+                                           **provisioning_options)
 
     @na_utils.trace
     def _share_exists(self, share_name, vserver_client):
@@ -800,6 +818,7 @@ class NetAppCmodeFileStorageLibrary(object):
         # Get existing volume info
         volume = vserver_client.get_volume_to_manage(aggregate_name,
                                                      volume_name)
+
         if not volume:
             msg = _('Volume %(volume)s not found on aggregate %(aggr)s.')
             msg_args = {'volume': volume_name, 'aggr': aggregate_name}
@@ -865,6 +884,65 @@ class NetAppCmodeFileStorageLibrary(object):
             msg = _('Volume %(volume)s must not have junctioned volumes.')
             msg_args = {'volume': volume['name']}
             raise exception.ManageInvalidShare(reason=msg % msg_args)
+
+        if vserver_client.volume_has_snapmirror_relationships(volume):
+            msg = _('Volume %(volume)s must not be in any snapmirror '
+                    'relationships.')
+            msg_args = {'volume': volume['name']}
+            raise exception.ManageInvalidShare(reason=msg % msg_args)
+
+    @na_utils.trace
+    def manage_existing_snapshot(self, snapshot, driver_options):
+        """Brings an existing snapshot under Manila management."""
+        vserver, vserver_client = self._get_vserver(share_server=None)
+        share_name = self._get_backend_share_name(snapshot['share_id'])
+        existing_snapshot_name = snapshot.get('provider_location')
+        new_snapshot_name = self._get_backend_snapshot_name(snapshot['id'])
+
+        if not existing_snapshot_name:
+            msg = _('provider_location not specified.')
+            raise exception.ManageInvalidShareSnapshot(reason=msg)
+
+        # Get the volume containing the snapshot so we can report its size
+        try:
+            volume = vserver_client.get_volume(share_name)
+        except (netapp_api.NaApiError,
+                exception.StorageResourceNotFound,
+                exception.NetAppException):
+            msg = _('Could not determine snapshot %(snap)s size from '
+                    'volume %(vol)s.')
+            msg_args = {'snap': existing_snapshot_name, 'vol': share_name}
+            LOG.exception(msg % msg_args)
+            raise exception.ShareNotFound(share_id=snapshot['share_id'])
+
+        # Ensure there aren't any mirrors on this volume
+        if vserver_client.volume_has_snapmirror_relationships(volume):
+            msg = _('Share %s has SnapMirror relationships.')
+            msg_args = {'vol': share_name}
+            raise exception.ManageInvalidShareSnapshot(reason=msg % msg_args)
+
+        # Rename snapshot
+        try:
+            vserver_client.rename_snapshot(share_name,
+                                           existing_snapshot_name,
+                                           new_snapshot_name)
+        except netapp_api.NaApiError:
+            msg = _('Could not rename snapshot %(snap)s in share %(vol)s.')
+            msg_args = {'snap': existing_snapshot_name, 'vol': share_name}
+            raise exception.ManageInvalidShareSnapshot(reason=msg % msg_args)
+
+        # Save original snapshot info to private storage
+        original_data = {'original_name': existing_snapshot_name}
+        self.private_storage.update(snapshot['id'], original_data)
+
+        # When calculating the size, round up to the next GB.
+        size = int(math.ceil(float(volume['size']) / units.Gi))
+
+        return {'size': size, 'provider_location': new_snapshot_name}
+
+    @na_utils.trace
+    def unmanage_snapshot(self, snapshot):
+        """Removes the specified snapshot from Manila management."""
 
     @na_utils.trace
     def create_consistency_group(self, context, cg_dict, share_server=None):
@@ -1100,13 +1178,18 @@ class NetAppCmodeFileStorageLibrary(object):
         if not self._have_cluster_creds:
             return
 
-        raid_types = self._client.get_aggregate_raid_types(aggregate_names)
-        for aggregate_name, raid_type in raid_types.items():
-            ssc_stats[aggregate_name]['netapp_raid_type'] = raid_type
+        for aggregate_name in aggregate_names:
 
-        disk_types = self._client.get_aggregate_disk_types(aggregate_names)
-        for aggregate_name, disk_type in disk_types.items():
-            ssc_stats[aggregate_name]['netapp_disk_type'] = disk_type
+            aggregate = self._client.get_aggregate(aggregate_name)
+            hybrid = (six.text_type(aggregate.get('is-hybrid')).lower()
+                      if 'is-hybrid' in aggregate else None)
+            disk_types = self._client.get_aggregate_disk_types(aggregate_name)
+
+            ssc_stats[aggregate_name].update({
+                'netapp_raid_type': aggregate.get('raid-type'),
+                'netapp_hybrid_aggregate': hybrid,
+                'netapp_disk_type': disk_types,
+            })
 
     def _find_active_replica(self, replica_list):
         # NOTE(ameade): Find current active replica. There can only be one
@@ -1157,8 +1240,9 @@ class NetAppCmodeFileStorageLibrary(object):
         # Ensure that all potential snapmirror relationships and their metadata
         # involving the replica are destroyed.
         for other_replica in replica_list:
-            dm_session.delete_snapmirror(other_replica, replica)
-            dm_session.delete_snapmirror(replica, other_replica)
+            if other_replica['id'] != replica['id']:
+                dm_session.delete_snapmirror(other_replica, replica)
+                dm_session.delete_snapmirror(replica, other_replica)
 
         # 2. Delete share
         vserver_client = data_motion.get_client_for_backend(

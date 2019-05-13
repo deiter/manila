@@ -16,20 +16,24 @@
 from oslo_log import log
 import six
 
-from tempest.common.utils.linux import remote_client  # noqa
-from tempest import config  # noqa
+from tempest.common.utils.linux import remote_client
+from tempest import config
 from tempest.lib.common.utils import data_utils
-from tempest.scenario import manager  # noqa
+from tempest.scenario import manager
 
-from manila_tempest_tests import clients_share
+from manila_tempest_tests.common import constants
+from manila_tempest_tests.services.share.json import shares_client
+from manila_tempest_tests.services.share.v2.json import (
+    shares_client as shares_v2_client)
 
 CONF = config.CONF
-
 LOG = log.getLogger(__name__)
 
 
 class ShareScenarioTest(manager.NetworkScenarioTest):
     """Provide harness to do Manila scenario tests."""
+
+    credentials = ('admin', 'primary')
 
     @classmethod
     def resource_setup(cls):
@@ -37,11 +41,14 @@ class ShareScenarioTest(manager.NetworkScenarioTest):
         super(ShareScenarioTest, cls).resource_setup()
 
         # Manila clients
-        cls.shares_client = clients_share.Manager().shares_client
-        cls.shares_v2_client = clients_share.Manager().shares_v2_client
-        cls.shares_admin_client = clients_share.AdminManager().shares_client
-        cls.shares_admin_v2_client = (
-            clients_share.AdminManager().shares_v2_client)
+        cls.shares_client = shares_client.SharesClient(
+            cls.os_primary.auth_provider)
+        cls.shares_v2_client = shares_v2_client.SharesV2Client(
+            cls.os_primary.auth_provider)
+        cls.shares_admin_client = shares_client.SharesClient(
+            cls.os_admin.auth_provider)
+        cls.shares_admin_v2_client = shares_v2_client.SharesV2Client(
+            cls.os_admin.auth_provider)
 
     def _create_share(self, share_protocol=None, size=1, name=None,
                       snapshot_id=None, description=None, metadata=None,
@@ -101,6 +108,7 @@ class ShareScenarioTest(manager.NetworkScenarioTest):
             search_opts={"share_network": sn_id})
         for server in servers:
             client.delete_share_server(server['id'])
+        for server in servers:
             client.wait_for_resource_deletion(server_id=server['id'])
 
     def _create_share_network(self, client=None, **kwargs):
@@ -143,18 +151,14 @@ class ShareScenarioTest(manager.NetworkScenarioTest):
             self.addCleanup(client.delete_access_rule, share_id, access['id'])
         return access
 
-    def _create_router_interface(self, subnet_id, client=None,
-                                 tenant_id=None, router_id=None):
+    def _create_router_interface(self, subnet_id, client=None, router_id=None):
         """Create a router interface
 
         :param subnet_id: id of the subnet
         :param client: client object
-        :param tenant_id
         """
         if not client:
-            client = self.network_client
-        if not tenant_id:
-            tenant_id = client.tenant_id
+            client = self.routers_client
         if not router_id:
             router_id = self._get_router()['id']
         client.add_router_interface(router_id, subnet_id=subnet_id)
@@ -193,11 +197,19 @@ class ShareScenarioTest(manager.NetworkScenarioTest):
 
         return linux_client
 
-    def _migrate_share(self, share_id, dest_host, client=None):
+    def _migrate_share(self, share_id, dest_host, status, client=None):
         client = client or self.shares_admin_v2_client
-        client.migrate_share(share_id, dest_host, True)
-        share = client.wait_for_migration_status(share_id, dest_host,
-                                                 'migration_success')
+        client.migrate_share(share_id, dest_host, writable=False,
+                             preserve_metadata=False, nondisruptive=False)
+        share = client.wait_for_migration_status(share_id, dest_host, status)
+        return share
+
+    def _migration_complete(self, share_id, dest_host, client=None, **kwargs):
+        client = client or self.shares_admin_v2_client
+        client.migration_complete(share_id, **kwargs)
+        share = client.wait_for_migration_status(
+            share_id, dest_host, constants.TASK_STATE_MIGRATION_SUCCESS,
+            **kwargs)
         return share
 
     def _create_share_type(self, name, is_public=True, **kwargs):

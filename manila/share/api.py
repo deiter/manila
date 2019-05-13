@@ -32,10 +32,7 @@ from manila.common import constants
 from manila.data import rpcapi as data_rpcapi
 from manila.db import base
 from manila import exception
-from manila.i18n import _
-from manila.i18n import _LE
-from manila.i18n import _LI
-from manila.i18n import _LW
+from manila.i18n import _, _LE, _LI, _LW
 from manila import policy
 from manila import quota
 from manila.scheduler import rpcapi as scheduler_rpcapi
@@ -114,11 +111,11 @@ class API(base.Base):
             if share_type is None:
                 # Grab the source share's share_type if no new share type
                 # has been provided.
-                share_type_id = source_share['share_type_id']
+                share_type_id = source_share['instance']['share_type_id']
                 share_type = share_types.get_share_type(context, share_type_id)
             else:
                 share_type_id = share_type['id']
-                if share_type_id != source_share['share_type_id']:
+                if share_type_id != source_share['instance']['share_type_id']:
                     msg = _("Invalid share type specified: the requested "
                             "share type must match the type of the source "
                             "share. If a share type is not specified when "
@@ -231,7 +228,6 @@ class API(base.Base):
                    'display_name': name,
                    'display_description': description,
                    'share_proto': share_proto,
-                   'share_type_id': share_type_id,
                    'is_public': is_public,
                    'consistency_group_id': consistency_group_id,
                    }
@@ -258,7 +254,8 @@ class API(base.Base):
         self.create_instance(context, share, share_network_id=share_network_id,
                              host=host, availability_zone=availability_zone,
                              consistency_group=consistency_group,
-                             cgsnapshot_member=cgsnapshot_member)
+                             cgsnapshot_member=cgsnapshot_member,
+                             share_type_id=share_type_id)
 
         # Retrieve the share with instance details
         share = self.db.share_get(context, share['id'])
@@ -267,20 +264,28 @@ class API(base.Base):
 
     def create_instance(self, context, share, share_network_id=None,
                         host=None, availability_zone=None,
-                        consistency_group=None, cgsnapshot_member=None):
+                        consistency_group=None, cgsnapshot_member=None,
+                        share_type_id=None):
         policy.check_policy(context, 'share', 'create')
 
         request_spec, share_instance = (
-            self._create_share_instance_and_get_request_spec(
+            self.create_share_instance_and_get_request_spec(
                 context, share, availability_zone=availability_zone,
                 consistency_group=consistency_group, host=host,
-                share_network_id=share_network_id))
+                share_network_id=share_network_id,
+                share_type_id=share_type_id))
 
         if cgsnapshot_member:
-            host = cgsnapshot_member['share']['host']
+            # Inherit properties from the cgsnapshot_member
+            member_share_instance = cgsnapshot_member['share_instance']
+            updates = {
+                'host': member_share_instance['host'],
+                'share_network_id': member_share_instance['share_network_id'],
+                'share_server_id': member_share_instance['share_server_id'],
+            }
             share = self.db.share_instance_update(context,
                                                   share_instance['id'],
-                                                  {'host': host})
+                                                  updates)
             # NOTE(ameade): Do not cast to driver if creating from cgsnapshot
             return
 
@@ -301,9 +306,10 @@ class API(base.Base):
 
         return share_instance
 
-    def _create_share_instance_and_get_request_spec(
+    def create_share_instance_and_get_request_spec(
             self, context, share, availability_zone=None,
-            consistency_group=None, host=None, share_network_id=None):
+            consistency_group=None, host=None, share_network_id=None,
+            share_type_id=None):
 
         availability_zone_id = None
         if availability_zone:
@@ -321,6 +327,7 @@ class API(base.Base):
                 'scheduled_at': timeutils.utcnow(),
                 'host': host if host else '',
                 'availability_zone_id': availability_zone_id,
+                'share_type_id': share_type_id,
             }
         )
 
@@ -333,7 +340,7 @@ class API(base.Base):
             'share_server_id': share_instance['share_server_id'],
             'snapshot_support': share['snapshot_support'],
             'share_proto': share['share_proto'],
-            'share_type_id': share['share_type_id'],
+            'share_type_id': share_type_id,
             'is_public': share['is_public'],
             'consistency_group_id': share['consistency_group_id'],
             'source_cgsnapshot_member_id': share[
@@ -350,12 +357,13 @@ class API(base.Base):
             'host': share_instance['host'],
             'status': share_instance['status'],
             'replica_state': share_instance['replica_state'],
+            'share_type_id': share_instance['share_type_id'],
         }
 
         share_type = None
-        if share['share_type_id']:
+        if share_instance['share_type_id']:
             share_type = self.db.share_type_get(
-                context, share['share_type_id'])
+                context, share_instance['share_type_id'])
 
         request_spec = {
             'share_properties': share_properties,
@@ -387,9 +395,10 @@ class API(base.Base):
             raise exception.ReplicationException(reason=msg % share['id'])
 
         request_spec, share_replica = (
-            self._create_share_instance_and_get_request_spec(
+            self.create_share_instance_and_get_request_spec(
                 context, share, availability_zone=availability_zone,
-                share_network_id=share_network_id))
+                share_network_id=share_network_id,
+                share_type_id=share['instance']['share_type_id']))
 
         all_replicas = self.db.share_replicas_get_all_by_share(
             context, share['id'])
@@ -505,15 +514,15 @@ class API(base.Base):
             'share_type_id': share_data['share_type_id']
         })
 
-        share_type = {}
         share_type_id = share_data['share_type_id']
-        if share_type_id:
-            share_type = share_types.get_share_type(context, share_type_id)
+        share_type = share_types.get_share_type(context, share_type_id)
 
         snapshot_support = strutils.bool_from_string(
             share_type.get('extra_specs', {}).get(
                 'snapshot_support', True) if share_type else True,
             strict=True)
+        replication_type = share_type.get('extra_specs', {}).get(
+            'replication_type')
 
         share_data.update({
             'user_id': context.user_id,
@@ -521,79 +530,76 @@ class API(base.Base):
             'status': constants.STATUS_MANAGING,
             'scheduled_at': timeutils.utcnow(),
             'snapshot_support': snapshot_support,
+            'replication_type': replication_type,
         })
 
         LOG.debug("Manage: Found shares %s.", len(shares))
-
-        retry_states = (constants.STATUS_MANAGE_ERROR,)
 
         export_location = share_data.pop('export_location')
 
         if len(shares) == 0:
             share = self.db.share_create(context, share_data)
-        # NOTE(u_glide): Case when administrator have fixed some problems and
-        # tries to manage share again
-        elif len(shares) == 1 and shares[0]['status'] in retry_states:
-            share = self.db.share_update(context, shares[0]['id'], share_data)
         else:
             msg = _("Share already exists.")
-            raise exception.ManilaException(msg)
+            raise exception.InvalidShare(reason=msg)
 
         self.db.share_export_locations_update(context, share.instance['id'],
                                               export_location)
 
-        request_spec = self._get_request_spec_dict(share, share_type, size=0)
+        request_spec = self._get_request_spec_dict(
+            share, share_type, size=0, share_proto=share_data['share_proto'],
+            host=share_data['host'])
 
-        try:
-            self.scheduler_rpcapi.manage_share(context, share['id'],
-                                               driver_options, request_spec)
-        except Exception:
-            msg = _('Host %(host)s did not pass validation for managing of '
-                    'share %(share)s with type %(type)s.') % {
-                'host': share['host'],
-                'share': share['id'],
-                'type': share['share_type_id']}
-            raise exception.InvalidHost(reason=msg)
+        # NOTE(ganso): Scheduler is called to validate if share type
+        # provided can fit in host provided. It will invoke manage upon
+        # successful validation.
+        self.scheduler_rpcapi.manage_share(context, share['id'],
+                                           driver_options, request_spec)
+
         return self.db.share_get(context, share['id'])
 
     def _get_request_spec_dict(self, share, share_type, **kwargs):
+
+        if share is None:
+            share = {'instance': {}}
+
         share_instance = share['instance']
 
         share_properties = {
-            'size': kwargs.get('size', share['size']),
-            'user_id': kwargs.get('user_id', share['user_id']),
-            'project_id': kwargs.get('project_id', share['project_id']),
+            'size': kwargs.get('size', share.get('size')),
+            'user_id': kwargs.get('user_id', share.get('user_id')),
+            'project_id': kwargs.get('project_id', share.get('project_id')),
             'snapshot_support': kwargs.get(
                 'snapshot_support',
                 share_type['extra_specs']['snapshot_support']),
-            'share_proto': kwargs.get('share_proto', share['share_proto']),
-            'share_type_id': kwargs.get('share_type_id',
-                                        share['share_type_id']),
-            'is_public': kwargs.get('is_public', share['is_public']),
-            'consistency_group_id': kwargs.get('consistency_group_id',
-                                               share['consistency_group_id']),
+            'share_proto': kwargs.get('share_proto', share.get('share_proto')),
+            'share_type_id': share_type['id'],
+            'is_public': kwargs.get('is_public', share.get('is_public')),
+            'consistency_group_id': kwargs.get(
+                'consistency_group_id', share.get('consistency_group_id')),
             'source_cgsnapshot_member_id': kwargs.get(
                 'source_cgsnapshot_member_id',
-                share['source_cgsnapshot_member_id']),
-            'snapshot_id': kwargs.get('snapshot_id', share['snapshot_id']),
+                share.get('source_cgsnapshot_member_id')),
+            'snapshot_id': kwargs.get('snapshot_id', share.get('snapshot_id')),
         }
         share_instance_properties = {
             'availability_zone_id': kwargs.get(
                 'availability_zone_id',
-                share_instance['availability_zone_id']),
-            'share_network_id': kwargs.get('share_network_id',
-                                           share_instance['share_network_id']),
-            'share_server_id': kwargs.get('share_server_id',
-                                          share_instance['share_server_id']),
-            'share_id': kwargs.get('share_id', share_instance['share_id']),
-            'host': kwargs.get('host', share_instance['host']),
-            'status': kwargs.get('status', share_instance['status']),
+                share_instance.get('availability_zone_id')),
+            'share_network_id': kwargs.get(
+                'share_network_id', share_instance.get('share_network_id')),
+            'share_server_id': kwargs.get(
+                'share_server_id', share_instance.get('share_server_id')),
+            'share_id': kwargs.get('share_id', share_instance.get('share_id')),
+            'host': kwargs.get('host', share_instance.get('host')),
+            'status': kwargs.get('status', share_instance.get('status')),
         }
+
         request_spec = {
             'share_properties': share_properties,
             'share_instance_properties': share_instance_properties,
             'share_type': share_type,
-            'share_id': share['id']
+            'share_id': share.get('id'),
         }
         return request_spec
 
@@ -617,6 +623,12 @@ class API(base.Base):
             share = self.db.share_get(context, snapshot_data['share_id'])
         except exception.NotFound:
             raise exception.ShareNotFound(share_id=snapshot_data['share_id'])
+
+        if share['has_replicas']:
+            msg = (_("Share %s has replicas. Snapshots of this share cannot "
+                     "currently be managed until all replicas are removed.")
+                   % share['id'])
+            raise exception.InvalidShare(reason=msg)
 
         existing_snapshots = self.db.share_snapshot_get_all_for_share(
             context, snapshot_data['share_id'])
@@ -864,8 +876,10 @@ class API(base.Base):
 
         return snapshot
 
-    def migration_start(self, context, share, host, force_host_copy,
-                        notify=True):
+    def migration_start(
+            self, context, share, dest_host, force_host_assisted_migration,
+            preserve_metadata=True, writable=True, nondisruptive=False,
+            new_share_network=None, new_share_type=None):
         """Migrates share to a new host."""
 
         share_instance = share.instance
@@ -889,10 +903,10 @@ class API(base.Base):
         self._check_is_share_busy(share)
 
         # Make sure the destination host is different than the current one
-        if host == share_instance['host']:
+        if dest_host == share_instance['host']:
             msg = _('Destination host %(dest_host)s must be different '
                     'than the current host %(src_host)s.') % {
-                'dest_host': host,
+                'dest_host': dest_host,
                 'src_host': share_instance['host']}
             raise exception.InvalidHost(reason=msg)
 
@@ -902,100 +916,238 @@ class API(base.Base):
             msg = _("Share %s must not have snapshots.") % share['id']
             raise exception.InvalidShare(reason=msg)
 
-        # Make sure the host is in the list of available hosts
-        utils.validate_service_host(context, share_utils.extract_host(host))
+        dest_host_host = share_utils.extract_host(dest_host)
 
-        # NOTE(ganso): there is the possibility of an error between here and
-        # manager code, which will cause the share to be stuck in
-        # MIGRATION_STARTING status. According to Liberty Midcycle discussion,
-        # this kind of scenario should not be cleaned up, the administrator
-        # should be issued to clear this status before a new migration request
-        # is made
-        self.update(
-            context, share,
+        # Make sure the host is in the list of available hosts
+        utils.validate_service_host(context, dest_host_host)
+
+        service = self.db.service_get_by_args(
+            context, dest_host_host, 'manila-share')
+
+        if new_share_type:
+            share_type = new_share_type
+            new_share_type_id = new_share_type['id']
+            dhss = share_type['extra_specs']['driver_handles_share_servers']
+            dhss = strutils.bool_from_string(dhss, strict=True)
+            if (dhss and not new_share_network and
+                    not share_instance['share_network_id']):
+                msg = _(
+                    "New share network must be provided when share type of"
+                    " given share %s has extra_spec "
+                    "'driver_handles_share_servers' as True.") % share['id']
+                raise exception.InvalidInput(reason=msg)
+        else:
+            share_type = {}
+            share_type_id = share_instance['share_type_id']
+            if share_type_id:
+                share_type = share_types.get_share_type(context, share_type_id)
+            new_share_type_id = share_instance['share_type_id']
+
+        dhss = share_type['extra_specs']['driver_handles_share_servers']
+        dhss = strutils.bool_from_string(dhss, strict=True)
+
+        if dhss:
+            if new_share_network:
+                new_share_network_id = new_share_network['id']
+            else:
+                new_share_network_id = share_instance['share_network_id']
+        else:
+            if new_share_network:
+                msg = _(
+                    "New share network must not be provided when share type of"
+                    " given share %s has extra_spec "
+                    "'driver_handles_share_servers' as False.") % share['id']
+                raise exception.InvalidInput(reason=msg)
+
+            new_share_network_id = None
+
+        request_spec = self._get_request_spec_dict(
+            share,
+            share_type,
+            availability_zone_id=service['availability_zone_id'],
+            share_network_id=new_share_network_id)
+
+        self.db.share_update(
+            context, share['id'],
             {'task_state': constants.TASK_STATE_MIGRATION_STARTING})
 
-        share_type = {}
-        share_type_id = share['share_type_id']
-        if share_type_id:
-            share_type = share_types.get_share_type(context, share_type_id)
+        self.db.share_instance_update(context, share_instance['id'],
+                                      {'status': constants.STATUS_MIGRATING})
 
-        request_spec = self._get_request_spec_dict(share, share_type)
-
-        try:
-            self.scheduler_rpcapi.migrate_share_to_host(context, share['id'],
-                                                        host, force_host_copy,
-                                                        notify, request_spec)
-        except Exception:
-            msg = _('Destination host %(dest_host)s did not pass validation '
-                    'for migration of share %(share)s.') % {
-                'dest_host': host,
-                'share': share['id']}
-            raise exception.InvalidHost(reason=msg)
+        self.scheduler_rpcapi.migrate_share_to_host(
+            context, share['id'], dest_host, force_host_assisted_migration,
+            preserve_metadata, writable, nondisruptive, new_share_network_id,
+            new_share_type_id, request_spec)
 
     def migration_complete(self, context, share):
 
         if share['task_state'] not in (
                 constants.TASK_STATE_DATA_COPYING_COMPLETED,
                 constants.TASK_STATE_MIGRATION_DRIVER_PHASE1_DONE):
-            msg = _("First migration phase of share %s not completed"
-                    " yet.") % share['id']
+            msg = self._migration_validate_error_message(share)
+            if msg is None:
+                msg = _("First migration phase of share %s not completed"
+                        " yet.") % share['id']
             LOG.error(msg)
             raise exception.InvalidShare(reason=msg)
+
+        share_instance_id, new_share_instance_id = (
+            self.get_migrating_instances(share))
+
+        share_instance_ref = self.db.share_instance_get(
+            context, share_instance_id, with_share_data=True)
+
+        self.share_rpcapi.migration_complete(context, share_instance_ref,
+                                             new_share_instance_id)
+
+    def get_migrating_instances(self, share):
 
         share_instance_id = None
         new_share_instance_id = None
 
-        if share['task_state'] == (
-                constants.TASK_STATE_DATA_COPYING_COMPLETED):
+        for instance in share.instances:
+            if instance['status'] == constants.STATUS_MIGRATING:
+                share_instance_id = instance['id']
+            if instance['status'] == constants.STATUS_MIGRATING_TO:
+                new_share_instance_id = instance['id']
 
-            for instance in share.instances:
-                if instance['status'] == constants.STATUS_MIGRATING:
-                    share_instance_id = instance['id']
-                if instance['status'] == constants.STATUS_MIGRATING_TO:
-                    new_share_instance_id = instance['id']
+        if None in (share_instance_id, new_share_instance_id):
+            msg = _("Share instances %(instance_id)s and "
+                    "%(new_instance_id)s in inconsistent states, cannot"
+                    " continue share migration for share %(share_id)s"
+                    ".") % {'instance_id': share_instance_id,
+                            'new_instance_id': new_share_instance_id,
+                            'share_id': share['id']}
+            raise exception.ShareMigrationFailed(reason=msg)
 
-            if None in (share_instance_id, new_share_instance_id):
-                msg = _("Share instances %(instance_id)s and "
-                        "%(new_instance_id)s in inconsistent states, cannot"
-                        " continue share migration for share %(share_id)s"
-                        ".") % {'instance_id': share_instance_id,
-                                'new_instance_id': new_share_instance_id,
-                                'share_id': share['id']}
-                raise exception.ShareMigrationFailed(reason=msg)
-
-        share_rpc = share_rpcapi.ShareAPI()
-        share_rpc.migration_complete(context, share, share_instance_id,
-                                     new_share_instance_id)
+        return share_instance_id, new_share_instance_id
 
     def migration_get_progress(self, context, share):
 
         if share['task_state'] == (
                 constants.TASK_STATE_MIGRATION_DRIVER_IN_PROGRESS):
 
-            share_rpc = share_rpcapi.ShareAPI()
-            return share_rpc.migration_get_progress(context, share)
+            share_instance_id, migrating_instance_id = (
+                self.get_migrating_instances(share))
+
+            share_instance_ref = self.db.share_instance_get(
+                context, share_instance_id, with_share_data=True)
+
+            service_host = share_utils.extract_host(share_instance_ref['host'])
+
+            service = self.db.service_get_by_args(
+                context, service_host, 'manila-share')
+
+            if utils.service_is_up(service):
+                try:
+                    result = self.share_rpcapi.migration_get_progress(
+                        context, share_instance_ref, migrating_instance_id)
+                except Exception:
+                    msg = _("Failed to obtain migration progress of share "
+                            "%s.") % share['id']
+                    LOG.exception(msg)
+                    raise exception.ShareMigrationError(reason=msg)
+            else:
+                result = None
 
         elif share['task_state'] == (
                 constants.TASK_STATE_DATA_COPYING_IN_PROGRESS):
             data_rpc = data_rpcapi.DataAPI()
             LOG.info(_LI("Sending request to get share migration information"
                      " of share %s.") % share['id'])
-            return data_rpc.data_copy_get_progress(context, share['id'])
 
+            services = self.db.service_get_all_by_topic(context, 'manila-data')
+
+            if len(services) > 0 and utils.service_is_up(services[0]):
+
+                try:
+                    result = data_rpc.data_copy_get_progress(
+                        context, share['id'])
+                except Exception:
+                    msg = _("Failed to obtain migration progress of share "
+                            "%s.") % share['id']
+                    LOG.exception(msg)
+                    raise exception.ShareMigrationError(reason=msg)
+            else:
+                result = None
         else:
-            msg = _("Migration of share %s data copy progress cannot be "
-                    "obtained at this moment.") % share['id']
+            result = self._migration_get_progress_state(share)
+
+        if not (result and result.get('total_progress') is not None):
+            msg = self._migration_validate_error_message(share)
+            if msg is None:
+                msg = _("Migration progress of share %s cannot be obtained at "
+                        "this moment.") % share['id']
             LOG.error(msg)
             raise exception.InvalidShare(reason=msg)
 
+        return result
+
+    def _migration_get_progress_state(self, share):
+
+        task_state = share['task_state']
+        if task_state in (constants.TASK_STATE_MIGRATION_SUCCESS,
+                          constants.TASK_STATE_DATA_COPYING_ERROR,
+                          constants.TASK_STATE_MIGRATION_CANCELLED,
+                          constants.TASK_STATE_MIGRATION_COMPLETING,
+                          constants.TASK_STATE_MIGRATION_DRIVER_PHASE1_DONE,
+                          constants.TASK_STATE_DATA_COPYING_COMPLETED,
+                          constants.TASK_STATE_DATA_COPYING_COMPLETING,
+                          constants.TASK_STATE_DATA_COPYING_CANCELLED,
+                          constants.TASK_STATE_MIGRATION_ERROR):
+            return {'total_progress': 100}
+        elif task_state in (constants.TASK_STATE_MIGRATION_STARTING,
+                            constants.TASK_STATE_MIGRATION_DRIVER_STARTING,
+                            constants.TASK_STATE_DATA_COPYING_STARTING,
+                            constants.TASK_STATE_MIGRATION_IN_PROGRESS):
+            return {'total_progress': 0}
+        else:
+            return None
+
+    def _migration_validate_error_message(self, share):
+
+        task_state = share['task_state']
+        if task_state == constants.TASK_STATE_MIGRATION_SUCCESS:
+            msg = _("Migration of share %s has already "
+                    "completed.") % share['id']
+        elif task_state in (None, constants.TASK_STATE_MIGRATION_ERROR):
+            msg = _("There is no migration being performed for share %s "
+                    "at this moment.") % share['id']
+        elif task_state == constants.TASK_STATE_MIGRATION_CANCELLED:
+            msg = _("Migration of share %s was already "
+                    "cancelled.") % share['id']
+        elif task_state in (constants.TASK_STATE_MIGRATION_DRIVER_PHASE1_DONE,
+                            constants.TASK_STATE_DATA_COPYING_COMPLETED):
+            msg = _("Migration of share %s has already completed first "
+                    "phase.") % share['id']
+        else:
+            return None
+        return msg
+
     def migration_cancel(self, context, share):
 
-        if share['task_state'] == (
+        migrating = True
+        if share['task_state'] in (
+                constants.TASK_STATE_DATA_COPYING_COMPLETED,
+                constants.TASK_STATE_MIGRATION_DRIVER_PHASE1_DONE,
                 constants.TASK_STATE_MIGRATION_DRIVER_IN_PROGRESS):
 
-            share_rpc = share_rpcapi.ShareAPI()
-            share_rpc.migration_cancel(context, share)
+            share_instance_id, migrating_instance_id = (
+                self.get_migrating_instances(share))
+
+            share_instance_ref = self.db.share_instance_get(
+                context, share_instance_id, with_share_data=True)
+
+            service_host = share_utils.extract_host(share_instance_ref['host'])
+
+            service = self.db.service_get_by_args(
+                context, service_host, 'manila-share')
+
+            if utils.service_is_up(service):
+                    self.share_rpcapi.migration_cancel(
+                        context, share_instance_ref, migrating_instance_id)
+            else:
+                migrating = False
 
         elif share['task_state'] == (
                 constants.TASK_STATE_DATA_COPYING_IN_PROGRESS):
@@ -1003,11 +1155,28 @@ class API(base.Base):
             data_rpc = data_rpcapi.DataAPI()
             LOG.info(_LI("Sending request to cancel migration of "
                          "share %s.") % share['id'])
-            data_rpc.data_copy_cancel(context, share['id'])
+
+            services = self.db.service_get_all_by_topic(context, 'manila-data')
+
+            if len(services) > 0 and utils.service_is_up(services[0]):
+                try:
+                    data_rpc.data_copy_cancel(context, share['id'])
+                except Exception:
+                    msg = _("Failed to cancel migration of share "
+                            "%s.") % share['id']
+                    LOG.exception(msg)
+                    raise exception.ShareMigrationError(reason=msg)
+            else:
+                migrating = False
 
         else:
-            msg = _("Data copy for migration of share %s cannot be cancelled"
-                    " at this moment.") % share['id']
+            migrating = False
+
+        if not migrating:
+            msg = self._migration_validate_error_message(share)
+            if msg is None:
+                msg = _("Migration of share %s cannot be cancelled at this "
+                        "moment.") % share['id']
             LOG.error(msg)
             raise exception.InvalidShare(reason=msg)
 
@@ -1036,8 +1205,8 @@ class API(base.Base):
                 context, snapshot, share['instance']['host'],
                 share_id=share['id'], force=force)
         else:
-            self.share_rpcapi.delete_snapshot(context, snapshot,
-                                              share['instance']['host'])
+            self.share_rpcapi.delete_snapshot(
+                context, snapshot, share['instance']['host'], force=force)
 
     @policy.wrap_check_policy('share')
     def update(self, context, share, fields):
@@ -1203,14 +1372,7 @@ class API(base.Base):
         # NOTE(tpsilva): refreshing share_access model
         access = self.db.share_access_get(ctx, access['id'])
 
-        return {
-            'id': access['id'],
-            'share_id': access['share_id'],
-            'access_type': access['access_type'],
-            'access_to': access['access_to'],
-            'access_level': access['access_level'],
-            'state': access['state'],
-        }
+        return access
 
     def allow_access_to_instance(self, context, share_instance, access):
         policy.check_policy(context, 'share', 'allow_access')
@@ -1292,12 +1454,7 @@ class API(base.Base):
         """Returns all access rules for share."""
         policy.check_policy(context, 'share', 'access_get_all')
         rules = self.db.share_access_get_all_for_share(context, share['id'])
-        return [{'id': rule.id,
-                 'access_type': rule.access_type,
-                 'access_to': rule.access_to,
-                 'access_level': rule.access_level,
-                 'state': rule.state,
-                 } for rule in rules]
+        return rules
 
     def access_get(self, context, access_id):
         """Returns access rule with the id."""

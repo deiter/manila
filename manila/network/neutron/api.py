@@ -94,8 +94,12 @@ neutron_opts = [
         help='Location of CA certificates file to use for '
              'neutron client requests.'),
     cfg.StrOpt(
+        'endpoint_type',
+        default='publicURL',
+        help='Endpoint type to be used with neutron client calls.'),
+    cfg.StrOpt(
         'region_name',
-        help='Region name for connecting to neutron in admin context')
+        help='Region name for connecting to neutron in admin context.'),
 ]
 
 CONF = cfg.CONF
@@ -145,7 +149,12 @@ class API(object):
                 cfg_group=NEUTRON_GROUP,
                 deprecated_opts_for_v2=v2_deprecated_opts)
 
-        return self.auth_obj.get_client(self, context)
+        return self.auth_obj.get_client(
+            self,
+            context,
+            endpoint_type=CONF[NEUTRON_GROUP].endpoint_type,
+            region_name=CONF[NEUTRON_GROUP].region_name,
+        )
 
     @property
     def admin_project_id(self):
@@ -164,7 +173,8 @@ class API(object):
 
     def create_port(self, tenant_id, network_id, host_id=None, subnet_id=None,
                     fixed_ip=None, device_owner=None, device_id=None,
-                    mac_address=None, security_group_ids=None, dhcp_opts=None):
+                    mac_address=None, security_group_ids=None, dhcp_opts=None,
+                    **kwargs):
         try:
             port_req_body = {'port': {}}
             port_req_body['port']['network_id'] = network_id
@@ -187,6 +197,8 @@ class API(object):
                 port_req_body['port']['device_owner'] = device_owner
             if device_id:
                 port_req_body['port']['device_id'] = device_id
+            if kwargs:
+                port_req_body['port'].update(kwargs)
             port = self.client.create_port(port_req_body).get('port', {})
             return port
         except neutron_client_exc.NeutronClientException as e:

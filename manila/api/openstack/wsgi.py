@@ -29,9 +29,7 @@ from manila.api.openstack import api_version_request as api_version
 from manila.api.openstack import versioned_method
 from manila.common import constants
 from manila import exception
-from manila.i18n import _
-from manila.i18n import _LE
-from manila.i18n import _LI
+from manila.i18n import _, _LE, _LI
 from manila import policy
 from manila import wsgi
 
@@ -1215,7 +1213,8 @@ class AdminActionsMixin(object):
             raise webob.exc.HTTPBadRequest(explanation=msg)
         if update[status_attr] not in self.valid_statuses[status_attr]:
             expl = (_("Invalid state. Valid states: %s.") %
-                    ", ".join(self.valid_statuses[status_attr]))
+                    ", ".join(six.text_type(i) for i in
+                              self.valid_statuses[status_attr]))
             raise webob.exc.HTTPBadRequest(explanation=expl)
         return update
 

@@ -30,10 +30,7 @@ from manila.common import constants as const
 from manila import compute
 from manila import context
 from manila import exception
-from manila.i18n import _
-from manila.i18n import _LE
-from manila.i18n import _LI
-from manila.i18n import _LW
+from manila.i18n import _, _LE, _LI, _LW
 from manila.share import driver
 from manila.share.drivers import service_instance
 from manila import utils
@@ -499,7 +496,12 @@ class GenericShareDriver(driver.ExecuteMixin, driver.ShareDriver):
             attached_volumes = [vol.id for vol in
                                 self.compute_api.instance_volumes_list(
                                     self.admin_context, instance_id)]
-            volume = self._get_volume(context, share['id'])
+            try:
+                volume = self._get_volume(context, share['id'])
+            except exception.VolumeNotFound:
+                LOG.warning(_LW("Volume not found for share %s. "
+                                "Possibly already deleted."), share['id'])
+                volume = None
             if volume and volume['id'] in attached_volumes:
                 self.compute_api.instance_volume_detach(
                     self.admin_context,

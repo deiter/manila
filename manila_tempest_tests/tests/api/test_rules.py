@@ -78,7 +78,7 @@ class ShareIpRulesForNFSTest(base.BaseSharesTest):
         cls.access_type = "ip"
         cls.access_to = "2.2.2.2"
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @ddt.data('1.0', '2.9', LATEST_MICROVERSION)
     def test_create_delete_access_rules_with_one_ip(self, version):
 
@@ -120,7 +120,7 @@ class ShareIpRulesForNFSTest(base.BaseSharesTest):
             self.shares_v2_client.wait_for_resource_deletion(
                 rule_id=rule["id"], share_id=self.share['id'], version=version)
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @ddt.data('1.0', '2.9', LATEST_MICROVERSION)
     def test_create_delete_access_rule_with_cidr(self, version):
 
@@ -162,7 +162,7 @@ class ShareIpRulesForNFSTest(base.BaseSharesTest):
             self.shares_v2_client.wait_for_resource_deletion(
                 rule_id=rule["id"], share_id=self.share['id'], version=version)
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @testtools.skipIf(
         "nfs" not in CONF.share.enable_ro_access_level_for_protocols,
         "RO access rule tests are disabled for NFS protocol.")
@@ -175,7 +175,7 @@ class ShareIpRulesForNFSTest(base.BaseSharesTest):
 class ShareIpRulesForCIFSTest(ShareIpRulesForNFSTest):
     protocol = "cifs"
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @testtools.skipIf(
         "cifs" not in CONF.share.enable_ro_access_level_for_protocols,
         "RO access rule tests are disabled for CIFS protocol.")
@@ -200,7 +200,7 @@ class ShareUserRulesForNFSTest(base.BaseSharesTest):
         cls.access_type = "user"
         cls.access_to = CONF.share.username_for_user_rules
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @ddt.data('1.0', '2.9', LATEST_MICROVERSION)
     def test_create_delete_user_rule(self, version):
 
@@ -239,7 +239,7 @@ class ShareUserRulesForNFSTest(base.BaseSharesTest):
             self.shares_v2_client.wait_for_resource_deletion(
                 rule_id=rule["id"], share_id=self.share['id'], version=version)
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @testtools.skipIf(
         "nfs" not in CONF.share.enable_ro_access_level_for_protocols,
         "RO access rule tests are disabled for NFS protocol.")
@@ -252,7 +252,7 @@ class ShareUserRulesForNFSTest(base.BaseSharesTest):
 class ShareUserRulesForCIFSTest(ShareUserRulesForNFSTest):
     protocol = "cifs"
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @testtools.skipIf(
         "cifs" not in CONF.share.enable_ro_access_level_for_protocols,
         "RO access rule tests are disabled for CIFS protocol.")
@@ -279,7 +279,7 @@ class ShareCertRulesForGLUSTERFSTest(base.BaseSharesTest):
         # certificate that it possesses.
         cls.access_to = "client1.com"
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @ddt.data('1.0', '2.9', LATEST_MICROVERSION)
     def test_create_delete_cert_rule(self, version):
 
@@ -318,7 +318,7 @@ class ShareCertRulesForGLUSTERFSTest(base.BaseSharesTest):
             self.shares_v2_client.wait_for_resource_deletion(
                 rule_id=rule["id"], share_id=self.share['id'], version=version)
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @testtools.skipIf(
         "glusterfs" not in CONF.share.enable_ro_access_level_for_protocols,
         "RO access rule tests are disabled for GLUSTERFS protocol.")
@@ -376,7 +376,7 @@ class ShareCephxRulesForCephFSTest(base.BaseSharesTest):
         # Provide access to a client identified by a cephx auth id.
         cls.access_to = "bob"
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_BACKEND])
     @ddt.data("alice", "alice_bob", "alice bob")
     def test_create_delete_cephx_rule(self, access_to):
         rule = self.shares_v2_client.create_access_rule(
@@ -424,17 +424,17 @@ class ShareRulesTest(base.BaseSharesTest):
         elif CONF.share.enable_cephx_rules_for_protocols:
             cls.protocol = CONF.share.enable_cephx_rules_for_protocols[0]
             cls.access_type = "cephx"
-            cls.access_to = "alice"
+            cls.access_to = "eve"
         cls.shares_v2_client.share_protocol = cls.protocol
         cls.share = cls.create_share()
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_API_WITH_BACKEND])
     @ddt.data('1.0', '2.9', LATEST_MICROVERSION)
     def test_list_access_rules(self, version):
         if (utils.is_microversion_lt(version, '2.13') and
                 CONF.share.enable_cephx_rules_for_protocols):
-            msg = ("API version %s does not support cephx access type, "
-                   "need version greater than 2.13." % version)
+            msg = ("API version %s does not support cephx access type, need "
+                   "version >= 2.13." % version)
             raise self.skipException(msg)
 
         # create rule
@@ -465,7 +465,10 @@ class ShareRulesTest(base.BaseSharesTest):
                                                             version=version)
 
         # verify keys
-        for key in ("id", "access_type", "access_to", "access_level"):
+        keys = ("id", "access_type", "access_to", "access_level")
+        if utils.is_microversion_ge(version, '2.21'):
+            keys += ("access_key", )
+        for key in keys:
             [self.assertIn(key, r.keys()) for r in rules]
         for key in ('deleted', 'deleted_at', 'instance_mappings'):
             [self.assertNotIn(key, r.keys()) for r in rules]
@@ -474,6 +477,11 @@ class ShareRulesTest(base.BaseSharesTest):
         self.assertEqual(self.access_type, rules[0]["access_type"])
         self.assertEqual(self.access_to, rules[0]["access_to"])
         self.assertEqual('rw', rules[0]["access_level"])
+        if utils.is_microversion_ge(version, '2.21'):
+            if self.access_type == 'cephx':
+                self.assertIsNotNone(rules[0]['access_key'])
+            else:
+                self.assertIsNone(rules[0]['access_key'])
 
         # our share id in list and have no duplicates
         gen = [r["id"] for r in rules if r["id"] in rule["id"]]
@@ -490,13 +498,13 @@ class ShareRulesTest(base.BaseSharesTest):
             self.shares_v2_client.wait_for_resource_deletion(
                 rule_id=rule["id"], share_id=self.share['id'], version=version)
 
-    @test.attr(type=["gate", ])
+    @test.attr(type=[base.TAG_POSITIVE, base.TAG_API_WITH_BACKEND])
     @ddt.data('1.0', '2.9', LATEST_MICROVERSION)
     def test_access_rules_deleted_if_share_deleted(self, version):
         if (utils.is_microversion_lt(version, '2.13') and
                 CONF.share.enable_cephx_rules_for_protocols):
-            msg = ("API version %s does not support cephx access type, "
-                   "need version greater than 2.13." % version)
+            msg = ("API version %s does not support cephx access type, need "
+                   "version >= 2.13." % version)
             raise self.skipException(msg)
 
         # create share
