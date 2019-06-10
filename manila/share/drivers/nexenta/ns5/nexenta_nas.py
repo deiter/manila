@@ -128,8 +128,12 @@ class NexentaNasDriver(driver.ShareDriver):
             message = (_('NFS root filesystem %(path)s is not mounted')
                        % {'path': filesystem['mountPoint']})
             raise jsonrpc.NefException(code='ENOTDIR', message=message)
+        payload = {}
         if filesystem['nonBlockingMandatoryMode']:
-            payload = {'nonBlockingMandatoryMode': False}
+            payload['nonBlockingMandatoryMode'] = False
+        if filesystem['smartCompression']:
+            payload['smartCompression'] = False
+        if payload:
             self.nef.filesystems.set(self.root_path, payload)
         service = self.nef.services.get('nfs')
         if service['state'] != 'online':
@@ -188,7 +192,7 @@ class NexentaNasDriver(driver.ShareDriver):
         if filesystem['mountPoint'] == 'none':
             payload = {'datasetName': dataset_path}
             self.nef.hpr.activate(payload)
-            filesystem = self.nef.filesystems.get(dataset_path)
+            filesystem = self.nef.filesystems.get(dataset_path, payload)
         elif not filesystem['isMounted']:
             self.nef.filesystems.mount(dataset_path)
         return '%s:%s' % (self.nas_host, filesystem['mountPoint'])
@@ -418,8 +422,9 @@ class NexentaNasDriver(driver.ShareDriver):
         LOG.debug('Updating access to share %(id)s with following access '
                   'rules: %(rules)s', {
                       'id': self._get_share_name(share),
-                      'rules': [(rule.access_type, rule.access_level,
-                                 rule.access_to) for rule in access_rules]})
+                      'rules': [(
+                          rule.get('access_type'), rule.get('access_level'),
+                          rule.get('access_to')) for rule in access_rules]})
         rw_list = []
         ro_list = []
         if share['share_proto'] == 'NFS':
@@ -471,7 +476,7 @@ class NexentaNasDriver(driver.ShareDriver):
                                     addr))
                 rule_list.append(ls)
 
-            # Prevent setting a context type without any addresses, this results in an API error
+            # Context type with no addresses will result in an API error
             if rule_list:
                 security_contexts[sc_type] = rule_list
 
@@ -554,8 +559,8 @@ class NexentaNasDriver(driver.ShareDriver):
             'pools': [{
                 'pool_name': self.pool_name,
                 'compression': compression,
-                'total_capacity_gb': int(total),
-                'free_capacity_gb': int(free),
+                'total_capacity_gb': total,
+                'free_capacity_gb': free,
                 'reserved_percentage': (
                     self.configuration.reserved_share_percentage),
                 'max_over_subscription_ratio': (
@@ -571,8 +576,8 @@ class NexentaNasDriver(driver.ShareDriver):
     def _get_capacity_info(self):
         """Calculate available space on the NFS share."""
         data = self.nef.filesystems.get(self.root_path)
-        free = utils.bytes_to_gb(data['bytesAvailable'])
-        allocated = utils.bytes_to_gb(data['bytesUsed'])
+        free = int(utils.bytes_to_gb(data['bytesAvailable']))
+        allocated = int(utils.bytes_to_gb(data['bytesUsed']))
         total = free + allocated
         return total, free, allocated
 
