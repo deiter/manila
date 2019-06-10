@@ -1,4 +1,4 @@
-# Copyright 2016 Nexenta Systems, Inc.
+# Copyright 2019 Nexenta Systems, Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -21,9 +21,9 @@ from oslo_utils import units
 from manila import context
 from manila import exception
 from manila.share import configuration as conf
+from manila.share.drivers.nexenta.ns5 import jsonrpc
 from manila.share.drivers.nexenta.ns5 import nexenta_nas
 from manila import test
-from manila.share.drivers.nexenta.ns5 import jsonrpc
 
 RPC_PATH = 'manila.share.drivers.nexenta.ns5.jsonrpc'
 DRV_PATH = 'manila.share.drivers.nexenta.ns5.nexenta_nas.NexentaNasDriver'

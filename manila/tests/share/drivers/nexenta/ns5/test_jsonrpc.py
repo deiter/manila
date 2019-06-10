@@ -26,9 +26,9 @@ import mock
 import requests
 import six
 
-from manila import test
 from manila.share import configuration as conf
 from manila.share.drivers.nexenta.ns5 import jsonrpc
+from manila import test
 
 
 class FakeNefProxy(object):
