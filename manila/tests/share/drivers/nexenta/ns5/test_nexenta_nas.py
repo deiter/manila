@@ -347,3 +347,20 @@ class TestNexentaNasDriver(test.TestCase):
             'bytesAvailable': 9 * units.Gi, 'bytesUsed': 1 * units.Gi}
 
         self.assertEqual((10, 9, 1), self.drv._get_capacity_info())
+
+    @patch('%s._set_reservation' % DRV_PATH)
+    @patch('%s._set_quota' % DRV_PATH)
+    @patch('%s.NefFilesystems.rename' % RPC_PATH)
+    @patch('%s.NefFilesystems.get' % RPC_PATH)
+    def test_manage_existing(self, fs_get, fs_rename, set_res, set_quota):
+        fs_get.return_value = {'referencedQuotaSize': 1073741824}
+        old_path = '%s:/%s' % (self.cfg.nexenta_nas_host, 'path_to_fs')
+        new_path = '%s:/%s' % (self.cfg.nexenta_nas_host, SHARE_PATH)
+        SHARE['export_locations'] = [{'path': old_path}]
+        expected = {'size': 2, 'export_locations': [{
+            'path': new_path
+        }]}
+        self.assertEqual(expected, self.drv.manage_existing(SHARE, None))
+        fs_rename.assert_called_with('path_to_fs', {'newPath': SHARE_PATH})
+        set_res.assert_called_with(SHARE, 2)
+        set_quota.assert_called_with(SHARE, 2)

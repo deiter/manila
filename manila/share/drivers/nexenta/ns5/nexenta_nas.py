@@ -370,16 +370,15 @@ class NexentaNasDriver(driver.ShareDriver):
 
         # check that filesystem with provided export exists.
         fs_path = export_path.split(':/')[1]
-        fs_list = self.nef.filesystems.get(fs_path)
+        fs_data = self.nef.filesystems.get(fs_path)
 
-        if not fs_list:
+        if not fs_data:
             # wrong export path, raise exception.
             msg = _('Share %s does not exist on Nexenta Store appliance, '
                     'cannot manage.') % export_path
             raise exception.NexentaException(msg)
 
         # get dataset properties.
-        fs_data = self.nef.filesystems.get(fs_path)
         if fs_data['referencedQuotaSize']:
             size = (fs_data['referencedQuotaSize'] / units.Gi) + 1
         else:
