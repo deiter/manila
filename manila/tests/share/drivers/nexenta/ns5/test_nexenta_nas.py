@@ -209,6 +209,28 @@ class TestNexentaNasDriver(test.TestCase):
         self.drv.nef.filesystems.delete.assert_called_with(
             SHARE_PATH, delete_payload)
 
+    @patch('%s.NefFilesystems.promote' % RPC_PATH)
+    @patch('%s.NefSnapshots.get' % RPC_PATH)
+    @patch('%s.NefSnapshots.list' % RPC_PATH)
+    @patch('%s.NefFilesystems.delete' % RPC_PATH)
+    def test_delete_share(self, fs_delete, snap_list, snap_get, fs_promote):
+        delete_payload = {'force': True, 'snapshots': True}
+        snapshots_payload = {'parent': SHARE_PATH, 'fields': 'path'}
+        clones_payload = {'fields': 'clones,creationTxg'}
+        clone_path = '%s:/%s' % (self.cfg.nexenta_nas_host, 'path_to_fs')
+        fs_delete.side_effect = [
+            jsonrpc.NefException({
+                'message': 'some_error',
+                'code': 'EEXIST'}),
+            None]
+        snap_list.return_value = [{'path': '%s@snap1' % SHARE_PATH}]
+        snap_get.return_value = {'clones': [clone_path], 'creationTxg': 1}
+        self.assertIsNone(self.drv.delete_share(self.ctx, SHARE))
+        fs_delete.assert_called_with(SHARE_PATH, delete_payload)
+        fs_promote.assert_called_with(clone_path)
+        snap_get.assert_called_with('%s@snap1' % SHARE_PATH, clones_payload)
+        snap_list.assert_called_with(snapshots_payload)
+
     @patch('%s.NefFilesystems.mount' % RPC_PATH)
     @patch('%s.NefFilesystems.get' % RPC_PATH)
     def test_mount_filesystem(self, fs_get, fs_mount):
