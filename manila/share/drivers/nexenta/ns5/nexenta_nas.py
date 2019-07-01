@@ -253,7 +253,7 @@ class NexentaNasDriver(driver.ShareDriver):
 
     def delete_share(self, context, share, share_server=None):
         """Delete a share."""
-        LOG.info('Delete share')
+        LOG.debug('Deleting share: %s.', self._get_share_name(share))
         share_path = self._get_dataset_path(share)
         delete_payload = {'force': True, 'snapshots': True}
         try:

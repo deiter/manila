@@ -13,7 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import ast
 import re
 import six
 
@@ -53,8 +52,3 @@ def str2gib_size(s):
 
 def bytes_to_gb(size):
     return float(size) / units.Gi
-
-
-def ex2err(ex):
-    """Convert a Cinder Exception to a Nexenta Error."""
-    return ast.literal_eval(ex.msg)
