@@ -22,13 +22,13 @@ from oslo_log import log as logging
 import requests
 import six
 
-from manila.exception import ManilaException
+from manila import exception
 from manila.i18n import _
 
 LOG = logging.getLogger(__name__)
 
 
-class NefException(ManilaException):
+class NefException(exception.ManilaException):
     def __init__(self, data=None, **kwargs):
         defaults = {
             'name': 'NexentaError',

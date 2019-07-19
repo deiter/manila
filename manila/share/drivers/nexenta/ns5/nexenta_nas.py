@@ -48,7 +48,7 @@ class NexentaNasDriver(driver.ShareDriver):
     def __init__(self, *args, **kwargs):
         """Do initialization."""
         LOG.debug('Initializing Nexenta driver.')
-        super(NexentaNasDriver, self).__init__((True, False), *args, **kwargs)
+        super(NexentaNasDriver, self).__init__(False, *args, **kwargs)
         self.configuration = kwargs.get('configuration')
         if self.configuration:
             self.configuration.append_config_values(
@@ -60,11 +60,6 @@ class NexentaNasDriver(driver.ShareDriver):
         else:
             raise exception.BadConfigurationException(
                 reason=_('Nexenta configuration missing.'))
-        required_params = ['nas_host', 'user', 'password', 'pool', 'folder']
-        for param in required_params:
-            if not getattr(self.configuration, 'nexenta_%s' % param):
-                msg = 'Required parameter nexenta_%s is not provided.' % param
-                raise exception.NexentaException(msg)
 
         self.nef = None
         self.verify_ssl = self.configuration.nexenta_ssl_cert_verify
@@ -238,9 +233,9 @@ class NexentaNasDriver(driver.ShareDriver):
         return posixpath.join(self.root_path, share_name)
 
     def _get_share_name(self, share):
-        """Get share name according to share name template."""
-        return ('%(template)s%(share_id)s' % {
-                'template': self.configuration.nexenta_share_name_template,
+        """Get share name with share name prefix."""
+        return ('%(prefix)s%(share_id)s' % {
+                'prefix': self.configuration.nexenta_share_name_prefix,
                 'share_id': share['share_id']})
 
     def _get_snapshot_path(self, snapshot):
