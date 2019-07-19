@@ -41,6 +41,8 @@ class NexentaNasDriver(driver.ShareDriver):
             - Unshare filesystem completely after last securityContext
               is removed.
             - Moved all http/url code to jsonrpc.
+            - Manage existing support.
+            - Revert to snapshot support.
     """
 
     driver_prefix = 'nexenta'
