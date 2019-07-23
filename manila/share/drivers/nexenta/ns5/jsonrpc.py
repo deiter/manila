@@ -178,6 +178,7 @@ class NefRequest(object):
             raise NefException(code='ENOMSG', message=message)
 
         method = 'get'
+        # pylint: disable=no-member,import-error
         if response.status_code == requests.codes.unauthorized:
             if self.stat[response.status_code] > self.proxy.retries:
                 raise NefException(content)
@@ -293,6 +294,7 @@ class NefRequest(object):
             LOG.debug('Failover result: %(code)s %(content)s',
                       {'code': response.status_code,
                        'content': response.content})
+            # pylint: disable=no-member,import-error
             if response.status_code == requests.codes.ok:
                 LOG.debug('Successful failover path '
                           '%(root)s to host %(host)s',
