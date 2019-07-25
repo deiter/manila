@@ -178,7 +178,7 @@ class NefRequest(object):
             raise NefException(code='ENOMSG', message=message)
 
         method = 'get'
-        # pylint: disable=no-member,import-error
+        # pylint: disable=no-member
         if response.status_code == requests.codes.unauthorized:
             if self.stat[response.status_code] > self.proxy.retries:
                 raise NefException(content)
@@ -294,7 +294,7 @@ class NefRequest(object):
             LOG.debug('Failover result: %(code)s %(content)s',
                       {'code': response.status_code,
                        'content': response.content})
-            # pylint: disable=no-member,import-error
+            # pylint: disable=no-member
             if response.status_code == requests.codes.ok:
                 LOG.debug('Successful failover path '
                           '%(root)s to host %(host)s',
@@ -512,7 +512,7 @@ class NefProxy(object):
         self.retries = len(self.hosts) * conf.nexenta_rest_retry_count
         self.timeout = (
             conf.nexenta_rest_connect_timeout, conf.nexenta_rest_read_timeout)
-        # pylint: disable=no-member,import-error
+        # pylint: disable=no-member
         max_retries = requests.packages.urllib3.util.retry.Retry(
             total=conf.nexenta_rest_retry_count,
             backoff_factor=conf.nexenta_rest_backoff_factor)
