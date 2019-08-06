@@ -4,7 +4,8 @@ features:
   - Added manage existing support for NexentaStor5 driver.
 upgrade:
   - Added a new config option ``nexenta_ssl_cert_verify``.
-    This option defines whether the driver should check ssl certificate.
+    This option defines whether the NexentaStor5 driver should check 
+    ssl certificate.
   - Added a new config option ``nexenta_rest_connect_timeout``. This option
     specifies the time limit (in seconds), within which the connection to
     NexentaStor management REST API server must be established.

@@ -23,8 +23,10 @@
 from oslo_config import cfg
 
 nexenta_connection_opts = [
-    cfg.HostAddressOpt('nexenta_rest_address',
+    cfg.HostAddressOpt('nexenta_host',
                        help='IP address of Nexenta storage appliance.'),
+    cfg.StrOpt('nexenta_rest_address',
+               help='IP address of Nexenta storage appliance.'),
     cfg.IntOpt('nexenta_rest_port',
                default=8457,
                help='Port to connect to Nexenta REST API server.'),
@@ -92,6 +94,8 @@ nexenta_nfs_opts = [
 ]
 
 nexenta_dataset_opts = [
+    cfg.StrOpt('nexenta_nfs_share',
+               default='nfs_share'),
     cfg.StrOpt('nexenta_share_name_prefix',
                help='Nexenta share name prefix.',
                default='share-'),
@@ -105,6 +109,10 @@ nexenta_dataset_opts = [
                         'gzip-4', 'gzip-5', 'gzip-6', 'gzip-7', 'gzip-8',
                         'gzip-9', 'lzjb', 'zle', 'lz4'],
                help='Compression value for new ZFS folders.'),
+    cfg.StrOpt('nexenta_dataset_dedupe',
+               default='off',
+               choices=['on', 'off', 'sha256', 'verify', 'sha256, verify'],
+               help='Deduplication value for new ZFS folders.'),
     cfg.BoolOpt('nexenta_thin_provisioning',
                 default=True,
                 help=('If True shares will not be space guaranteed and '

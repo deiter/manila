@@ -418,17 +418,26 @@ class NexentaNasDriver(driver.ShareDriver):
                           rule.get('access_to')) for rule in access_rules]})
         rw_list = []
         ro_list = []
+        update_dict = {}
         if share['share_proto'] == 'NFS':
             for rule in access_rules:
                 if rule['access_type'].lower() != 'ip':
                     msg = _(
                         'Only IP access control type is supported for NFS.')
-                    raise exception.InvalidShareAccess(reason=msg)
+                    LOG.info(msg)
+                    update_dict[rule['access_id']] = {
+                        'state': 'error',
+                    }
+                else:
+                    update_dict[rule['access_id']] = {
+                        'state': 'active',
+                    }
                 if rule['access_level'] == common.ACCESS_LEVEL_RW:
                     rw_list.append(rule['access_to'])
                 else:
                     ro_list.append(rule['access_to'])
             self._update_nfs_access(share, rw_list, ro_list)
+        return update_dict
 
     def _update_nfs_access(self, share, rw_list, ro_list):
         # Define allowed security context types to be able to tell whether
@@ -448,16 +457,10 @@ class NexentaNasDriver(driver.ShareDriver):
                 address = address_mask[0]
                 ls = {"allow": True, "etype": "fqdn", "entity": address}
                 if len(address_mask) == 2:
-                    try:
-                        mask = int(address_mask[1])
-                        if 0 <= mask < 31:
-                            ls['mask'] = mask
-                            ls['etype'] = 'network'
-                    except Exception:
-                        raise exception.InvalidInput(
-                            reason=_(
-                                '<{}> is not a valid access parameter').format(
-                                    addr))
+                    mask = int(address_mask[1])
+                    if 0 <= mask < 31:
+                        ls['mask'] = mask
+                        ls['etype'] = 'network'
                 rule_list.append(ls)
 
             # Context type with no addresses will result in an API error

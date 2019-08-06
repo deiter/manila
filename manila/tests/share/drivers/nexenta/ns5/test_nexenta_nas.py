@@ -325,7 +325,7 @@ class TestNexentaNasDriver(test.TestCase):
         for fqdn in ro_list:
             security_contexts['readOnlyList'].append(self.parse_fqdn(fqdn))
 
-        self.assertRaises(exception.InvalidInput, self.drv._update_nfs_access,
+        self.assertRaises(ValueError, self.drv._update_nfs_access,
                           SHARE, rw_list, ro_list)
 
     @patch('%s._update_nfs_access' % DRV_PATH)
@@ -333,11 +333,14 @@ class TestNexentaNasDriver(test.TestCase):
         access = {
             'access_type': 'ip',
             'access_to': '1.1.1.1',
-            'access_level': 'rw'
+            'access_level': 'rw',
+            'access_id': 'fake_id'
         }
 
-        self.assertIsNone(self.drv.update_access(
-            self.ctx, SHARE, [access], None, None))
+        self.assertEqual(
+            {'fake_id': {'state': 'active'}},
+            self.drv.update_access(
+                self.ctx, SHARE, [access], None, None))
         self.drv._update_nfs_access.assert_called_with(SHARE, ['1.1.1.1'], [])
 
     @patch('%s._update_nfs_access' % DRV_PATH)
@@ -345,11 +348,14 @@ class TestNexentaNasDriver(test.TestCase):
         access = {
             'access_type': 'ip',
             'access_to': '1.1.1.1',
-            'access_level': 'ro'
+            'access_level': 'ro',
+            'access_id': 'fake_id'
         }
 
-        self.assertIsNone(self.drv.update_access(
-            self.ctx, SHARE, [access], None, None))
+        expected = {'fake_id': {'state': 'active'}}
+        self.assertEqual(
+            expected, self.drv.update_access(
+                self.ctx, SHARE, [access], None, None))
         self.drv._update_nfs_access.assert_called_with(SHARE, [], ['1.1.1.1'])
 
     @ddt.data('rw', 'ro')
@@ -357,10 +363,12 @@ class TestNexentaNasDriver(test.TestCase):
         access = {
             'access_type': 'username',
             'access_to': 'some_user',
-            'access_level': access_level
+            'access_level': access_level,
+            'access_id': 'fake_id'
         }
-        self.assertRaises(exception.InvalidShareAccess, self.drv.update_access,
-                          self.ctx, SHARE, [access], None, None)
+        expected = {'fake_id': {'state': 'error'}}
+        self.assertEqual(expected, self.drv.update_access(
+            self.ctx, SHARE, [access], None, None))
 
     @patch('%s._get_capacity_info' % DRV_PATH)
     @patch('manila.share.driver.ShareDriver._update_share_stats')
