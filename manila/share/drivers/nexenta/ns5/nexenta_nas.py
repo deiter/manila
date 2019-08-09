@@ -65,7 +65,6 @@ class NexentaNasDriver(driver.ShareDriver):
 
         self.nef = None
         self.verify_ssl = self.configuration.nexenta_ssl_cert_verify
-        self.nef_host = self.configuration.nexenta_rest_address
         self.nas_host = self.configuration.nexenta_nas_host
         self.nef_port = self.configuration.nexenta_rest_port
         self.nef_user = self.configuration.nexenta_user

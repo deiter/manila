@@ -25,8 +25,8 @@ from oslo_config import cfg
 nexenta_connection_opts = [
     cfg.HostAddressOpt('nexenta_host',
                        help='IP address of Nexenta storage appliance.'),
-    cfg.StrOpt('nexenta_rest_address',
-               help='IP address of Nexenta storage appliance.'),
+    cfg.ListOpt('nexenta_rest_address',
+                help='IP address of Nexenta storage appliance.'),
     cfg.IntOpt('nexenta_rest_port',
                default=8457,
                help='Port to connect to Nexenta REST API server.'),
