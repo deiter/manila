@@ -24,9 +24,10 @@ from oslo_config import cfg
 
 nexenta_connection_opts = [
     cfg.HostAddressOpt('nexenta_host',
-                       help='IP address of Nexenta storage appliance.'),
-    cfg.ListOpt('nexenta_rest_address',
-                help='IP address of Nexenta storage appliance.'),
+                       help='Data IP address of Nexenta storage appliance.'),
+    cfg.ListOpt('nexenta_rest_addresses',
+                help='One or more comma delimited IP addresses for management '
+                     'communication with NexentaStor appliance.'),
     cfg.IntOpt('nexenta_rest_port',
                default=8457,
                help='Port to connect to Nexenta REST API server.'),
@@ -85,9 +86,10 @@ nexenta_connection_opts = [
 ]
 
 nexenta_nfs_opts = [
-    cfg.StrOpt('nexenta_nas_host',
-               help='IP address of Nexenta storage appliance.',
-               required=True),
+    cfg.HostAddressOpt('nexenta_nas_host',
+                       deprecated_name='nexenta_host',
+                       help='Data IP address of Nexenta storage appliance.',
+                       required=True),
     cfg.StrOpt('nexenta_mount_point_base',
                default='$state_path/mnt',
                help='Base directory that contains NFS share mount points.'),
@@ -95,7 +97,9 @@ nexenta_nfs_opts = [
 
 nexenta_dataset_opts = [
     cfg.StrOpt('nexenta_nfs_share',
-               default='nfs_share'),
+               default='nfs_share',
+               help='Parent filesystem where all the shares will be created. '
+                    'This parameter is only used by NexentaStor4 driver.'),
     cfg.StrOpt('nexenta_share_name_prefix',
                help='Nexenta share name prefix.',
                default='share-'),
@@ -112,7 +116,8 @@ nexenta_dataset_opts = [
     cfg.StrOpt('nexenta_dataset_dedupe',
                default='off',
                choices=['on', 'off', 'sha256', 'verify', 'sha256, verify'],
-               help='Deduplication value for new ZFS folders.'),
+               help='Deduplication value for new ZFS folders. '
+                    'Only used by NexentaStor4 driver.'),
     cfg.BoolOpt('nexenta_thin_provisioning',
                 default=True,
                 help=('If True shares will not be space guaranteed and '

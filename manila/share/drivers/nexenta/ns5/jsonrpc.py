@@ -494,8 +494,8 @@ class NefProxy(object):
         self.username = conf.nexenta_user
         self.password = conf.nexenta_password
         self.hosts = []
-        if conf.nexenta_rest_address:
-            for host in conf.nexenta_rest_address:
+        if conf.nexenta_rest_addresses:
+            for host in conf.nexenta_rest_addresses:
                 self.hosts.append(host.strip())
         self.root = self.filesystems.path(path)
         if not self.hosts:

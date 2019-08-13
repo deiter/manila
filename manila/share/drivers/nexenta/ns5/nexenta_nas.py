@@ -423,7 +423,7 @@ class NexentaNasDriver(driver.ShareDriver):
                 if rule['access_type'].lower() != 'ip':
                     msg = _(
                         'Only IP access control type is supported for NFS.')
-                    LOG.info(msg)
+                    LOG.warning(msg)
                     update_dict[rule['access_id']] = {
                         'state': 'error',
                     }
