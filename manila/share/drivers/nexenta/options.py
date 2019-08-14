@@ -23,8 +23,6 @@
 from oslo_config import cfg
 
 nexenta_connection_opts = [
-    cfg.HostAddressOpt('nexenta_host',
-                       help='Data IP address of Nexenta storage appliance.'),
     cfg.ListOpt('nexenta_rest_addresses',
                 help='One or more comma delimited IP addresses for management '
                      'communication with NexentaStor appliance.'),

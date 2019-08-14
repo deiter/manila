@@ -47,7 +47,7 @@ class TestNexentaNasDriver(test.TestCase):
             self.cfg, 'safe_get', mock.Mock(side_effect=_safe_get))
         super(TestNexentaNasDriver, self).setUp()
         self.cfg.nexenta_nas_host = '1.1.1.1'
-        self.cfg.nexenta_rest_address = '2.2.2.2'
+        self.cfg.nexenta_rest_addresses = ['2.2.2.2']
         self.ctx = context.get_admin_context()
         self.cfg.nexenta_rest_port = 8080
         self.cfg.nexenta_rest_protocol = 'auto'
