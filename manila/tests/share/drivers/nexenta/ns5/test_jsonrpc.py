@@ -1030,7 +1030,7 @@ class TestNefProxy(test.TestCase):
         self.cfg.nexenta_ssl_cert_verify = True
         self.cfg.nexenta_user = 'user'
         self.cfg.nexenta_password = 'pass'
-        self.cfg.nexenta_rest_address = '1.1.1.1,2.2.2.2'
+        self.cfg.nexenta_rest_addresses = ['1.1.1.1', '2.2.2.2']
         self.cfg.nexenta_rest_port = 8443
         self.cfg.nexenta_rest_backoff_factor = 1
         self.cfg.nexenta_rest_retry_count = 3
@@ -1078,14 +1078,14 @@ class TestNefProxy(test.TestCase):
     def test___init___nfs_no_rest_address(self):
         proto = 'nfs'
         cfg = copy.copy(self.cfg)
-        cfg.nexenta_rest_address = ''
+        cfg.nexenta_rest_addresses = ''
         result = jsonrpc.NefProxy(proto, cfg.nexenta_folder, cfg)
         self.assertIsInstance(result, jsonrpc.NefProxy)
 
     def test___init___iscsi_no_rest_address(self):
         proto = 'iscsi'
         cfg = copy.copy(self.cfg)
-        cfg.nexenta_rest_address = ''
+        cfg.nexenta_rest_addresses = ''
         cfg.nexenta_host = '4.4.4.4'
         result = jsonrpc.NefProxy(proto, cfg.nexenta_folder, cfg)
         self.assertIsInstance(result, jsonrpc.NefProxy)
@@ -1125,7 +1125,7 @@ class TestNefProxy(test.TestCase):
     def test_update_host(self):
         token = 'token'
         bearer = 'Bearer %s' % token
-        host = self.cfg.nexenta_rest_address
+        host = self.cfg.nexenta_rest_addresses[0]
         self.proxy.tokens[host] = token
         self.assertIsNone(self.proxy.update_host(host))
         self.assertEqual(self.proxy.session.headers['Authorization'], bearer)
