@@ -33,7 +33,7 @@ The following operations are supported:
 
   Note the following limitation:
 
-    - Only IP based access is supported.
+    * Only IP based access is supported (ro/rw).
 
 - Deny share access
 
@@ -93,4 +93,4 @@ Driver options
 The following table contains the configuration options specific to the
 share driver.
 
-.. include:: ../../tables/manila-nexenta.inc
+.. include:: ../../tables/manila-nexentastor5.inc

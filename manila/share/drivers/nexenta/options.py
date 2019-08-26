@@ -27,7 +27,7 @@ nexenta_connection_opts = [
                 help='One or more comma delimited IP addresses for management '
                      'communication with NexentaStor appliance.'),
     cfg.IntOpt('nexenta_rest_port',
-               default=8457,
+               default=8443,
                help='Port to connect to Nexenta REST API server.'),
     cfg.IntOpt('nexenta_retry_count',
                default=6,
