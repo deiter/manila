@@ -60,11 +60,6 @@ Requirements
 Configuration
 ~~~~~~~~~~~~~~
 
-To configure Quobyte access for the Shared File System service, a back end
-configuration section has to be added in the ``manila.conf`` file. Add the
-name of the configuration section to ``enabled_share_backends`` in the
-``manila.conf`` file. For example, if the section is named ``Quobyte``:
-
 .. code-block:: ini
 
    enabled_share_backends = NexentaStor5
