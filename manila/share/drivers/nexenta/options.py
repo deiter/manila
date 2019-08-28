@@ -1,4 +1,4 @@
-# Copyright 2019 Nexenta Systems, Inc.
+# Copyright 2019 Nexenta by DDN, Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -29,9 +29,6 @@ nexenta_connection_opts = [
     cfg.IntOpt('nexenta_rest_port',
                default=8443,
                help='Port to connect to Nexenta REST API server.'),
-    cfg.IntOpt('nexenta_retry_count',
-               default=6,
-               help='Number of retries for unsuccessful API calls.'),
     cfg.StrOpt('nexenta_rest_protocol',
                default='auto',
                choices=['http', 'https', 'auto'],

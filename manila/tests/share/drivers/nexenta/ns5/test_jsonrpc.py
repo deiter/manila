@@ -1,4 +1,4 @@
-# Copyright 2019 Nexenta Systems, Inc.
+# Copyright 2019 Nexenta by DDN, Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -753,7 +753,7 @@ class TestNefRequest(test.TestCase):
         content = None
         instance = jsonrpc.NefRequest(self.proxy, method)
         result = instance.getpath(content, rel)
-        self.assertNone(result)
+        self.assertIsNone(result)
 
     def test_getpath_no_links(self):
         method = 'get'
@@ -986,6 +986,28 @@ class TestNefFilesystems(test.TestCase):
         path = posixpath.join(path, 'acl')
         self.proxy.post.return_value = expected
         result = self.instance.acl(name, payload)
+        self.proxy.post.assert_called_with(path, payload)
+        self.assertEqual(expected, result)
+
+    def test_promote(self):
+        name = 'parent/child'
+        payload = {'key': 'value'}
+        expected = None
+        path = self.instance.path(name)
+        path = posixpath.join(path, 'promote')
+        self.proxy.post.return_value = expected
+        result = self.instance.promote(name, payload)
+        self.proxy.post.assert_called_with(path, payload)
+        self.assertEqual(expected, result)
+
+    def test_rollback(self):
+        name = 'parent/child'
+        payload = {'key': 'value'}
+        expected = None
+        path = self.instance.path(name)
+        path = posixpath.join(path, 'rollback')
+        self.proxy.post.return_value = expected
+        result = self.instance.rollback(name, payload)
         self.proxy.post.assert_called_with(path, payload)
         self.assertEqual(expected, result)
 
