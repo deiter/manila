@@ -145,10 +145,7 @@ class TestNefRequest(test.TestCase):
         response = requests.Response()
         response.request = request
         response.status_code = code
-        if content:
-            response._content = json.dumps(content)
-        else:
-            response._content = ''
+        response._content = json.dumps(content) if content else ''
         return response
 
     def test___call___invalid_method(self):
@@ -647,7 +644,7 @@ class TestNefRequest(test.TestCase):
         response = self.fake_response(method, path, payload, 200, content)
         request.return_value = response
         instance.auth()
-        request.assert_called_with(method, path, **payload)
+        request.assert_called_once_with(method, path, **payload)
 
     @mock.patch('manila.share.drivers.nexenta.ns5.'
                 'jsonrpc.NefRequest.request')
@@ -678,7 +675,7 @@ class TestNefRequest(test.TestCase):
         response = self.fake_response(method, path, payload, 200, content)
         request.return_value = response
         result = instance.failover()
-        request.assert_called_with(method, path)
+        request.assert_called_once_with(method, path)
         expected = True
         self.assertEqual(expected, result)
 
@@ -693,7 +690,7 @@ class TestNefRequest(test.TestCase):
         response = self.fake_response(method, path, payload, 200, content)
         request.side_effect = [requests.exceptions.Timeout, response]
         result = instance.failover()
-        request.assert_called_with(method, path)
+        request.assert_called_once_with(method, path)
         expected = False
         self.assertEqual(expected, result)
 
@@ -708,7 +705,7 @@ class TestNefRequest(test.TestCase):
         response = self.fake_response(method, path, payload, 404, content)
         request.side_effect = [response, response]
         result = instance.failover()
-        request.assert_called_with(method, path)
+        request.assert_called_once_with(method, path)
         expected = False
         self.assertEqual(expected, result)
 
@@ -756,8 +753,7 @@ class TestNefRequest(test.TestCase):
         content = None
         instance = jsonrpc.NefRequest(self.proxy, method)
         result = instance.getpath(content, rel)
-        expected = None
-        self.assertEqual(expected, result)
+        self.assertNone(result)
 
     def test_getpath_no_links(self):
         method = 'get'

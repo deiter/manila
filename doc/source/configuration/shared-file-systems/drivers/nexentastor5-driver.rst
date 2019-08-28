@@ -21,7 +21,7 @@ The drivers supports NFS shares.
 
 The following operations are supported:
 
-- Create share
+- Create NFS share
 
 - Delete share
 
@@ -56,6 +56,10 @@ Requirements
 
 - Pool and parent filesystem configured (this filesystem will contain
   all manila shares)
+
+Restrictions
+~~~~~~~~~~~~
+- Only IP share access control is allowed for NFS shares.
 
 Configuration
 ~~~~~~~~~~~~~~

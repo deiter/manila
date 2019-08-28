@@ -13,8 +13,8 @@
       License for the specific language governing permissions and limitations
       under the License.
 
-Infortrend Driver for OpenStack Manila
-======================================
+NexentaStor5 Driver for OpenStack Manila
+========================================
 
 The `NexentaStor5 <http://www.nexenta.com>`__ Manila driver
 provides NFS shared file systems to OpenStack.
@@ -27,7 +27,7 @@ Requirements
 Supported shared filesystems and operations
 -------------------------------------------
 
-This driver supports NFS and CIFS shares.
+This driver supports NFS shares.
 
 The following operations are supported:
 
@@ -44,19 +44,20 @@ The following operations are supported:
 - Create snapshot
 - Revert to snapshot
 - Delete snapshot
+- Create share from snapshot
 
 Backend Configuration
 ---------------------
 
 The following parameters need to be configured in the manila configuration
-file for the Infortrend driver:
+file for the NexentaStor5 driver:
 
 - `share_backend_name` = <backend name to enable>
 - `share_driver` = manila.share.drivers.nexenta.ns5.nexenta_nas.NexentaNasDriver
 - `driver_handles_share_servers` = False
 - `nexenta_nas_host` = <Data address to NAS shares>
 - `nexenta_user` = <username for management operations>
-- `nexenta_password` = <password ffor management operations>
+- `nexenta_password` = <password for management operations>
 - `nexenta_pool` = <Pool name where NAS shares are created>
 - `nexenta_rest_addresses` = <Management address for Rest API access>
 - `nexenta_folder` = <Parent filesystem where all Manila shares are kept>
@@ -73,7 +74,11 @@ Manila requires that the share type includes the
 `driver_handles_share_servers` extra-spec. This ensures that the share
 will be created on a backend that supports the requested
 driver_handles_share_servers (share networks) capability.
-For the NexentaStor driver, this must be set to False.
+For the NexentaStor driver, this extra-spec's value must be set to False.
+
+Restrictions
+------------
+- Only IP share access control is allowed for NFS shares. 
 
 
 Back-end configuration example
