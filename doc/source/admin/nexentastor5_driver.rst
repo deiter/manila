@@ -78,7 +78,7 @@ For the NexentaStor driver, this extra-spec's value must be set to False.
 
 Restrictions
 ------------
-- Only IP share access control is allowed for NFS shares. 
+- Only IP share access control is allowed for NFS shares.
 
 
 Back-end configuration example
