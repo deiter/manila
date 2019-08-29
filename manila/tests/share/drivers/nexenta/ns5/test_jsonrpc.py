@@ -761,8 +761,7 @@ class TestNefRequest(test.TestCase):
         content = {'a': 'b'}
         instance = jsonrpc.NefRequest(self.proxy, method)
         result = instance.getpath(content, rel)
-        expected = None
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_getpath_no_rel(self):
         method = 'get'
@@ -777,8 +776,7 @@ class TestNefRequest(test.TestCase):
         }
         instance = jsonrpc.NefRequest(self.proxy, method)
         result = instance.getpath(content, rel)
-        expected = None
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_getpath_no_href(self):
         method = 'get'
@@ -792,8 +790,7 @@ class TestNefRequest(test.TestCase):
         }
         instance = jsonrpc.NefRequest(self.proxy, method)
         result = instance.getpath(content, rel)
-        expected = None
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
 
 class TestNefCollections(test.TestCase):
@@ -828,7 +825,7 @@ class TestNefCollections(test.TestCase):
         self.proxy.put.return_value = expected
         result = self.instance.set(name, payload)
         self.proxy.put.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_list(self):
         payload = {'key': 'value'}
@@ -844,7 +841,7 @@ class TestNefCollections(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.create(payload)
         self.proxy.post.assert_called_with(self.instance.root, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_create_exist(self):
         payload = {'key': 'value'}
@@ -852,7 +849,7 @@ class TestNefCollections(test.TestCase):
         self.proxy.post.side_effect = jsonrpc.NefException(code='EEXIST')
         result = self.instance.create(payload)
         self.proxy.post.assert_called_with(self.instance.root, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_create_error(self):
         payload = {'key': 'value'}
@@ -868,7 +865,7 @@ class TestNefCollections(test.TestCase):
         self.proxy.delete.return_value = expected
         result = self.instance.delete(name, payload)
         self.proxy.delete.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_delete_not_found(self):
         name = 'parent/child'
@@ -878,7 +875,7 @@ class TestNefCollections(test.TestCase):
         self.proxy.delete.side_effect = jsonrpc.NefException(code='ENOENT')
         result = self.instance.delete(name, payload)
         self.proxy.delete.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_delete_error(self):
         name = 'parent/child'
@@ -927,7 +924,7 @@ class TestNefDatasets(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.rename(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
 
 class TestNefSnapshots(test.TestCase):
@@ -946,7 +943,7 @@ class TestNefSnapshots(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.clone(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
 
 class TestNefFilesystems(test.TestCase):
@@ -965,7 +962,7 @@ class TestNefFilesystems(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.mount(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_unmount(self):
         name = 'parent/child'
@@ -976,7 +973,7 @@ class TestNefFilesystems(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.unmount(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_acl(self):
         name = 'parent/child'
@@ -987,7 +984,7 @@ class TestNefFilesystems(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.acl(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_promote(self):
         name = 'parent/child'
@@ -998,7 +995,7 @@ class TestNefFilesystems(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.promote(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_rollback(self):
         name = 'parent/child'
@@ -1009,7 +1006,7 @@ class TestNefFilesystems(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.rollback(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
 
 class TestNefHpr(test.TestCase):
@@ -1026,7 +1023,7 @@ class TestNefHpr(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.activate(payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_start(self):
         name = 'parent/child'
@@ -1036,7 +1033,7 @@ class TestNefHpr(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.start(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
 
 class TestNefProxy(test.TestCase):
