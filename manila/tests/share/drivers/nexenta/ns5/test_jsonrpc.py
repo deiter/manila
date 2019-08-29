@@ -845,7 +845,6 @@ class TestNefCollections(test.TestCase):
 
     def test_create_exist(self):
         payload = {'key': 'value'}
-        expected = None
         self.proxy.post.side_effect = jsonrpc.NefException(code='EEXIST')
         result = self.instance.create(payload)
         self.proxy.post.assert_called_with(self.instance.root, payload)
@@ -870,7 +869,6 @@ class TestNefCollections(test.TestCase):
     def test_delete_not_found(self):
         name = 'parent/child'
         payload = {'key': 'value'}
-        expected = None
         path = self.instance.path(name)
         self.proxy.delete.side_effect = jsonrpc.NefException(code='ENOENT')
         result = self.instance.delete(name, payload)
