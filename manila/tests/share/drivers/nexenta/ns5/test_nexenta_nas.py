@@ -1,4 +1,4 @@
-# Copyright 2019 Nexenta Systems, Inc.
+# Copyright 2019 Nexenta by DDN, Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,8 +19,6 @@ from mock import patch
 from oslo_utils import units
 
 from manila import context
-from manila import exception
-from manila.share import configuration as conf
 from manila.share.drivers.nexenta.ns5 import jsonrpc
 from manila.share.drivers.nexenta.ns5 import nexenta_nas
 from manila import test
@@ -30,6 +28,12 @@ DRV_PATH = 'manila.share.drivers.nexenta.ns5.nexenta_nas.NexentaNasDriver'
 DRIVER_VERSION = '1.1'
 SHARE = {'share_id': 'uuid', 'size': 1, 'share_proto': 'NFS'}
 SHARE_PATH = 'pool1/nfs_share/share-uuid'
+SHARE2 = {'share_id': 'uuid2', 'size': 2, 'share_proto': 'NFS'}
+SHARE2_PATH = 'pool1/nfs_share/share-uuid2'
+SNAPSHOT = {
+    'snapshot_id': 'snap_id',
+    'share': SHARE,
+    'snapshot_path': '%s@%s' % (SHARE_PATH, 'snapshot-snap_id')}
 
 
 @ddt.ddt
@@ -38,13 +42,13 @@ class TestNexentaNasDriver(test.TestCase):
     def setUp(self):
         def _safe_get(opt):
             return getattr(self.cfg, opt)
-        super(TestNexentaNasDriver, self).setUp()
-        self.cfg = conf.Configuration(None)
-        self.cfg.nexenta_nas_host = '1.1.1.1'
-        self.cfg.nexenta_rest_address = '2.2.2.2'
-        self.ctx = context.get_admin_context()
+        self.cfg = mock.Mock()
         self.mock_object(
             self.cfg, 'safe_get', mock.Mock(side_effect=_safe_get))
+        super(TestNexentaNasDriver, self).setUp()
+        self.cfg.nexenta_nas_host = '1.1.1.1'
+        self.cfg.nexenta_rest_addresses = ['2.2.2.2']
+        self.ctx = context.get_admin_context()
         self.cfg.nexenta_rest_port = 8080
         self.cfg.nexenta_rest_protocol = 'auto'
         self.cfg.nexenta_pool = 'pool1'
@@ -56,6 +60,9 @@ class TestNexentaNasDriver(test.TestCase):
         self.cfg.nexenta_password = 'password'
         self.cfg.nexenta_thin_provisioning = False
         self.cfg.nexenta_mount_point_base = 'mnt'
+        self.cfg.nexenta_rest_retry_count = 3
+        self.cfg.nexenta_share_name_prefix = 'share-'
+        self.cfg.max_over_subscription_ratio = 20.0
         self.cfg.enabled_share_protocols = 'NFS'
         self.cfg.nexenta_mount_point_base = '$state_path/mnt'
         self.cfg.nexenta_dataset_compression = 'on'
@@ -209,6 +216,28 @@ class TestNexentaNasDriver(test.TestCase):
         self.drv.nef.filesystems.delete.assert_called_with(
             SHARE_PATH, delete_payload)
 
+    @patch('%s.NefFilesystems.promote' % RPC_PATH)
+    @patch('%s.NefSnapshots.get' % RPC_PATH)
+    @patch('%s.NefSnapshots.list' % RPC_PATH)
+    @patch('%s.NefFilesystems.delete' % RPC_PATH)
+    def test_delete_share(self, fs_delete, snap_list, snap_get, fs_promote):
+        delete_payload = {'force': True, 'snapshots': True}
+        snapshots_payload = {'parent': SHARE_PATH, 'fields': 'path'}
+        clones_payload = {'fields': 'clones,creationTxg'}
+        clone_path = '%s:/%s' % (self.cfg.nexenta_nas_host, 'path_to_fs')
+        fs_delete.side_effect = [
+            jsonrpc.NefException({
+                'message': 'some_error',
+                'code': 'EEXIST'}),
+            None]
+        snap_list.return_value = [{'path': '%s@snap1' % SHARE_PATH}]
+        snap_get.return_value = {'clones': [clone_path], 'creationTxg': 1}
+        self.assertIsNone(self.drv.delete_share(self.ctx, SHARE))
+        fs_delete.assert_called_with(SHARE_PATH, delete_payload)
+        fs_promote.assert_called_with(clone_path)
+        snap_get.assert_called_with('%s@snap1' % SHARE_PATH, clones_payload)
+        snap_list.assert_called_with(snapshots_payload)
+
     @patch('%s.NefFilesystems.mount' % RPC_PATH)
     @patch('%s.NefFilesystems.get' % RPC_PATH)
     def test_mount_filesystem(self, fs_get, fs_mount):
@@ -217,6 +246,26 @@ class TestNexentaNasDriver(test.TestCase):
             'mountPoint': '/%s' % SHARE_PATH, 'isMounted': False}
         self.assertEqual(mount_path, self.drv._mount_filesystem(SHARE))
         self.drv.nef.filesystems.mount.assert_called_with(SHARE_PATH)
+
+    @patch('%s.NefHpr.activate' % RPC_PATH)
+    @patch('%s.NefFilesystems.mount' % RPC_PATH)
+    @patch('%s.NefFilesystems.get' % RPC_PATH)
+    def test_mount_filesystem_with_activate(
+            self, fs_get, fs_mount, hpr_activate):
+        mount_path = '%s:/%s' % (self.cfg.nexenta_nas_host, SHARE_PATH)
+        fs_get.side_effect = [
+            {'mountPoint': 'none', 'isMounted': False},
+            {'mountPoint': '/%s' % SHARE_PATH, 'isMounted': False}]
+        self.assertEqual(mount_path, self.drv._mount_filesystem(SHARE))
+        payload = {'datasetName': SHARE_PATH}
+        self.drv.nef.hpr.activate.assert_called_once_with(payload)
+
+    @patch('%s.NefFilesystems.mount' % RPC_PATH)
+    @patch('%s.NefFilesystems.unmount' % RPC_PATH)
+    def test_remount_filesystem(self, fs_unmount, fs_mount):
+        self.drv._remount_filesystem(SHARE_PATH)
+        fs_unmount.assert_called_once_with(SHARE_PATH)
+        fs_mount.assert_called_once_with(SHARE_PATH)
 
     def parse_fqdn(self, fqdn):
         address_mask = fqdn.strip().split('/', 1)
@@ -275,7 +324,7 @@ class TestNexentaNasDriver(test.TestCase):
         for fqdn in ro_list:
             security_contexts['readOnlyList'].append(self.parse_fqdn(fqdn))
 
-        self.assertRaises(exception.InvalidInput, self.drv._update_nfs_access,
+        self.assertRaises(ValueError, self.drv._update_nfs_access,
                           SHARE, rw_list, ro_list)
 
     @patch('%s._update_nfs_access' % DRV_PATH)
@@ -283,11 +332,14 @@ class TestNexentaNasDriver(test.TestCase):
         access = {
             'access_type': 'ip',
             'access_to': '1.1.1.1',
-            'access_level': 'rw'
+            'access_level': 'rw',
+            'access_id': 'fake_id'
         }
 
-        self.assertIsNone(self.drv.update_access(
-            self.ctx, SHARE, [access], None, None))
+        self.assertEqual(
+            {'fake_id': {'state': 'active'}},
+            self.drv.update_access(
+                self.ctx, SHARE, [access], None, None))
         self.drv._update_nfs_access.assert_called_with(SHARE, ['1.1.1.1'], [])
 
     @patch('%s._update_nfs_access' % DRV_PATH)
@@ -295,11 +347,14 @@ class TestNexentaNasDriver(test.TestCase):
         access = {
             'access_type': 'ip',
             'access_to': '1.1.1.1',
-            'access_level': 'ro'
+            'access_level': 'ro',
+            'access_id': 'fake_id'
         }
 
-        self.assertIsNone(self.drv.update_access(
-            self.ctx, SHARE, [access], None, None))
+        expected = {'fake_id': {'state': 'active'}}
+        self.assertEqual(
+            expected, self.drv.update_access(
+                self.ctx, SHARE, [access], None, None))
         self.drv._update_nfs_access.assert_called_with(SHARE, [], ['1.1.1.1'])
 
     @ddt.data('rw', 'ro')
@@ -307,10 +362,12 @@ class TestNexentaNasDriver(test.TestCase):
         access = {
             'access_type': 'username',
             'access_to': 'some_user',
-            'access_level': access_level
+            'access_level': access_level,
+            'access_id': 'fake_id'
         }
-        self.assertRaises(exception.InvalidShareAccess, self.drv.update_access,
-                          self.ctx, SHARE, [access], None, None)
+        expected = {'fake_id': {'state': 'error'}}
+        self.assertEqual(expected, self.drv.update_access(
+            self.ctx, SHARE, [access], None, None))
 
     @patch('%s._get_capacity_info' % DRV_PATH)
     @patch('manila.share.driver.ShareDriver._update_share_stats')
@@ -347,3 +404,131 @@ class TestNexentaNasDriver(test.TestCase):
             'bytesAvailable': 9 * units.Gi, 'bytesUsed': 1 * units.Gi}
 
         self.assertEqual((10, 9, 1), self.drv._get_capacity_info())
+
+    @patch('%s._set_reservation' % DRV_PATH)
+    @patch('%s._set_quota' % DRV_PATH)
+    @patch('%s.NefFilesystems.rename' % RPC_PATH)
+    @patch('%s.NefFilesystems.get' % RPC_PATH)
+    def test_manage_existing(self, fs_get, fs_rename, set_res, set_quota):
+        fs_get.return_value = {'referencedQuotaSize': 1073741824}
+        old_path = '%s:/%s' % (self.cfg.nexenta_nas_host, 'path_to_fs')
+        new_path = '%s:/%s' % (self.cfg.nexenta_nas_host, SHARE_PATH)
+        SHARE['export_locations'] = [{'path': old_path}]
+        expected = {'size': 2, 'export_locations': [{
+            'path': new_path
+        }]}
+        self.assertEqual(expected, self.drv.manage_existing(SHARE, None))
+        fs_rename.assert_called_with('path_to_fs', {'newPath': SHARE_PATH})
+        set_res.assert_called_with(SHARE, 2)
+        set_quota.assert_called_with(SHARE, 2)
+
+    @patch('%s.NefSnapshots.create' % RPC_PATH)
+    def test_create_snapshot(self, snap_create):
+        self.assertIsNone(self.drv.create_snapshot(self.ctx, SNAPSHOT))
+        snap_create.assert_called_once_with({
+            'path': SNAPSHOT['snapshot_path']})
+
+    @patch('%s.NefSnapshots.delete' % RPC_PATH)
+    def test_delete_snapshot(self, snap_delete):
+        self.assertIsNone(self.drv.delete_snapshot(self.ctx, SNAPSHOT))
+        payload = {'defer': True}
+        snap_delete.assert_called_once_with(
+            SNAPSHOT['snapshot_path'], payload)
+
+    @patch('%s._mount_filesystem' % DRV_PATH)
+    @patch('%s._remount_filesystem' % DRV_PATH)
+    @patch('%s.NefFilesystems.delete' % RPC_PATH)
+    @patch('%s.NefSnapshots.clone' % RPC_PATH)
+    def test_create_share_from_snapshot(
+            self, snap_clone, fs_delete, remount_fs, mount_fs):
+        mount_fs.return_value = 'mount_path'
+        location = {
+            'path': 'mount_path',
+            'id': 'share-uuid2'
+        }
+        self.assertEqual([location], self.drv.create_share_from_snapshot(
+            self.ctx, SHARE2, SNAPSHOT))
+
+        size = int(SHARE2['size'] * units.Gi * 1.1)
+        payload = {
+            'targetPath': SHARE2_PATH,
+            'referencedQuotaSize': size,
+            'recordSize': self.cfg.nexenta_dataset_record_size,
+            'compressionMode': self.cfg.nexenta_dataset_compression,
+            'nonBlockingMandatoryMode': False,
+            'referencedReservationSize': size
+        }
+        snap_clone.assert_called_once_with(SNAPSHOT['snapshot_path'], payload)
+
+    @patch('%s._mount_filesystem' % DRV_PATH)
+    @patch('%s._remount_filesystem' % DRV_PATH)
+    @patch('%s.NefFilesystems.delete' % RPC_PATH)
+    @patch('%s.NefSnapshots.clone' % RPC_PATH)
+    def test_create_share_from_snapshot_error(
+            self, snap_clone, fs_delete, remount_fs, mount_fs):
+        fs_delete.side_effect = jsonrpc.NefException('delete error')
+        mount_fs.side_effect = jsonrpc.NefException('create error')
+        self.assertRaises(
+            jsonrpc.NefException,
+            self.drv.create_share_from_snapshot, self.ctx, SHARE2, SNAPSHOT)
+
+        size = int(SHARE2['size'] * units.Gi * 1.1)
+        payload = {
+            'targetPath': SHARE2_PATH,
+            'referencedQuotaSize': size,
+            'recordSize': self.cfg.nexenta_dataset_record_size,
+            'compressionMode': self.cfg.nexenta_dataset_compression,
+            'nonBlockingMandatoryMode': False,
+            'referencedReservationSize': size
+        }
+        snap_clone.assert_called_once_with(SNAPSHOT['snapshot_path'], payload)
+        payload = {'force': True}
+        fs_delete.assert_called_once_with(SHARE2_PATH, payload)
+
+    @patch('%s.NefFilesystems.rollback' % RPC_PATH)
+    def test_revert_to_snapshot(self, fs_rollback):
+        self.assertIsNone(self.drv.revert_to_snapshot(
+            self.ctx, SNAPSHOT, [], []))
+        payload = {'snapshot': 'snapshot-snap_id'}
+        fs_rollback.assert_called_once_with(
+            SHARE_PATH, payload)
+
+    @patch('%s._set_reservation' % DRV_PATH)
+    @patch('%s._set_quota' % DRV_PATH)
+    def test_extend_share(self, set_quota, set_reservation):
+        self.assertIsNone(self.drv.extend_share(
+            SHARE, 2))
+        set_quota.assert_called_once_with(
+            SHARE, 2)
+        set_reservation.assert_called_once_with(
+            SHARE, 2)
+
+    @patch('%s.NefFilesystems.get' % RPC_PATH)
+    @patch('%s._set_reservation' % DRV_PATH)
+    @patch('%s._set_quota' % DRV_PATH)
+    def test_shrink_share(self, set_quota, set_reservation, fs_get):
+        fs_get.return_value = {
+            'bytesUsedBySelf': 0.5 * units.Gi
+        }
+        self.assertIsNone(self.drv.shrink_share(
+            SHARE2, 1))
+        set_quota.assert_called_once_with(
+            SHARE2, 1)
+        set_reservation.assert_called_once_with(
+            SHARE2, 1)
+
+    @patch('%s.NefFilesystems.set' % RPC_PATH)
+    def test_set_quota(self, fs_set):
+        quota = int(2 * units.Gi * 1.1)
+        payload = {'referencedQuotaSize': quota}
+        self.assertIsNone(self.drv._set_quota(
+            SHARE, 2))
+        fs_set.assert_called_once_with(SHARE_PATH, payload)
+
+    @patch('%s.NefFilesystems.set' % RPC_PATH)
+    def test_set_reservation(self, fs_set):
+        reservation = int(2 * units.Gi * 1.1)
+        payload = {'referencedReservationSize': reservation}
+        self.assertIsNone(self.drv._set_reservation(
+            SHARE, 2))
+        fs_set.assert_called_once_with(SHARE_PATH, payload)

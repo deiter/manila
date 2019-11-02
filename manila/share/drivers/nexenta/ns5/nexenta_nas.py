@@ -1,4 +1,4 @@
-# Copyright 2019 Nexenta Systems, Inc.
+# Copyright 2019 Nexenta by DDN, Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -41,6 +41,8 @@ class NexentaNasDriver(driver.ShareDriver):
             - Unshare filesystem completely after last securityContext
               is removed.
             - Moved all http/url code to jsonrpc.
+            - Manage existing support.
+            - Revert to snapshot support.
     """
 
     driver_prefix = 'nexenta'
@@ -48,7 +50,7 @@ class NexentaNasDriver(driver.ShareDriver):
     def __init__(self, *args, **kwargs):
         """Do initialization."""
         LOG.debug('Initializing Nexenta driver.')
-        super(NexentaNasDriver, self).__init__((True, False), *args, **kwargs)
+        super(NexentaNasDriver, self).__init__(False, *args, **kwargs)
         self.configuration = kwargs.get('configuration')
         if self.configuration:
             self.configuration.append_config_values(
@@ -60,15 +62,9 @@ class NexentaNasDriver(driver.ShareDriver):
         else:
             raise exception.BadConfigurationException(
                 reason=_('Nexenta configuration missing.'))
-        required_params = ['nas_host', 'user', 'password', 'pool', 'folder']
-        for param in required_params:
-            if not getattr(self.configuration, 'nexenta_%s' % param):
-                msg = 'Required parameter nexenta_%s is not provided.' % param
-                raise exception.NexentaException(msg)
 
         self.nef = None
         self.verify_ssl = self.configuration.nexenta_ssl_cert_verify
-        self.nef_host = self.configuration.nexenta_rest_address
         self.nas_host = self.configuration.nexenta_nas_host
         self.nef_port = self.configuration.nexenta_rest_port
         self.nef_user = self.configuration.nexenta_user
@@ -238,9 +234,9 @@ class NexentaNasDriver(driver.ShareDriver):
         return posixpath.join(self.root_path, share_name)
 
     def _get_share_name(self, share):
-        """Get share name according to share name template."""
-        return ('%(template)s%(share_id)s' % {
-                'template': self.configuration.nexenta_share_name_template,
+        """Get share name with share name prefix."""
+        return ('%(prefix)s%(share_id)s' % {
+                'prefix': self.configuration.nexenta_share_name_prefix,
                 'share_id': share['share_id']})
 
     def _get_snapshot_path(self, snapshot):
@@ -253,7 +249,7 @@ class NexentaNasDriver(driver.ShareDriver):
 
     def delete_share(self, context, share, share_server=None):
         """Delete a share."""
-        LOG.info('Delete share')
+        LOG.debug('Deleting share: %s.', self._get_share_name(share))
         share_path = self._get_dataset_path(share)
         delete_payload = {'force': True, 'snapshots': True}
         try:
@@ -370,16 +366,15 @@ class NexentaNasDriver(driver.ShareDriver):
 
         # check that filesystem with provided export exists.
         fs_path = export_path.split(':/')[1]
-        fs_list = self.nef.filesystems.get(fs_path)
+        fs_data = self.nef.filesystems.get(fs_path)
 
-        if not fs_list:
+        if not fs_data:
             # wrong export path, raise exception.
             msg = _('Share %s does not exist on Nexenta Store appliance, '
                     'cannot manage.') % export_path
             raise exception.NexentaException(msg)
 
         # get dataset properties.
-        fs_data = self.nef.filesystems.get(fs_path)
         if fs_data['referencedQuotaSize']:
             size = (fs_data['referencedQuotaSize'] / units.Gi) + 1
         else:
@@ -422,17 +417,26 @@ class NexentaNasDriver(driver.ShareDriver):
                           rule.get('access_to')) for rule in access_rules]})
         rw_list = []
         ro_list = []
+        update_dict = {}
         if share['share_proto'] == 'NFS':
             for rule in access_rules:
                 if rule['access_type'].lower() != 'ip':
                     msg = _(
                         'Only IP access control type is supported for NFS.')
-                    raise exception.InvalidShareAccess(reason=msg)
+                    LOG.warning(msg)
+                    update_dict[rule['access_id']] = {
+                        'state': 'error',
+                    }
+                else:
+                    update_dict[rule['access_id']] = {
+                        'state': 'active',
+                    }
                 if rule['access_level'] == common.ACCESS_LEVEL_RW:
                     rw_list.append(rule['access_to'])
                 else:
                     ro_list.append(rule['access_to'])
             self._update_nfs_access(share, rw_list, ro_list)
+        return update_dict
 
     def _update_nfs_access(self, share, rw_list, ro_list):
         # Define allowed security context types to be able to tell whether
@@ -452,16 +456,10 @@ class NexentaNasDriver(driver.ShareDriver):
                 address = address_mask[0]
                 ls = {"allow": True, "etype": "fqdn", "entity": address}
                 if len(address_mask) == 2:
-                    try:
-                        mask = int(address_mask[1])
-                        if 0 <= mask < 31:
-                            ls['mask'] = mask
-                            ls['etype'] = 'network'
-                    except Exception:
-                        raise exception.InvalidInput(
-                            reason=_(
-                                '<{}> is not a valid access parameter').format(
-                                    addr))
+                    mask = int(address_mask[1])
+                    if 0 <= mask < 31:
+                        ls['mask'] = mask
+                        ls['etype'] = 'network'
                 rule_list.append(ls)
 
             # Context type with no addresses will result in an API error

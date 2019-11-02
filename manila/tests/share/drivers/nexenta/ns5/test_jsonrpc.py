@@ -1,4 +1,4 @@
-# Copyright 2019 Nexenta Systems, Inc.
+# Copyright 2019 Nexenta by DDN, Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -145,10 +145,7 @@ class TestNefRequest(test.TestCase):
         response = requests.Response()
         response.request = request
         response.status_code = code
-        if content:
-            response._content = json.dumps(content)
-        else:
-            response._content = ''
+        response._content = json.dumps(content) if content else ''
         return response
 
     def test___call___invalid_method(self):
@@ -647,7 +644,7 @@ class TestNefRequest(test.TestCase):
         response = self.fake_response(method, path, payload, 200, content)
         request.return_value = response
         instance.auth()
-        request.assert_called_with(method, path, **payload)
+        request.assert_called_once_with(method, path, **payload)
 
     @mock.patch('manila.share.drivers.nexenta.ns5.'
                 'jsonrpc.NefRequest.request')
@@ -678,7 +675,7 @@ class TestNefRequest(test.TestCase):
         response = self.fake_response(method, path, payload, 200, content)
         request.return_value = response
         result = instance.failover()
-        request.assert_called_with(method, path)
+        request.assert_called_once_with(method, path)
         expected = True
         self.assertEqual(expected, result)
 
@@ -693,7 +690,7 @@ class TestNefRequest(test.TestCase):
         response = self.fake_response(method, path, payload, 200, content)
         request.side_effect = [requests.exceptions.Timeout, response]
         result = instance.failover()
-        request.assert_called_with(method, path)
+        request.assert_called_once_with(method, path)
         expected = False
         self.assertEqual(expected, result)
 
@@ -708,7 +705,7 @@ class TestNefRequest(test.TestCase):
         response = self.fake_response(method, path, payload, 404, content)
         request.side_effect = [response, response]
         result = instance.failover()
-        request.assert_called_with(method, path)
+        request.assert_called_once_with(method, path)
         expected = False
         self.assertEqual(expected, result)
 
@@ -756,8 +753,7 @@ class TestNefRequest(test.TestCase):
         content = None
         instance = jsonrpc.NefRequest(self.proxy, method)
         result = instance.getpath(content, rel)
-        expected = None
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_getpath_no_links(self):
         method = 'get'
@@ -765,8 +761,7 @@ class TestNefRequest(test.TestCase):
         content = {'a': 'b'}
         instance = jsonrpc.NefRequest(self.proxy, method)
         result = instance.getpath(content, rel)
-        expected = None
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_getpath_no_rel(self):
         method = 'get'
@@ -781,8 +776,7 @@ class TestNefRequest(test.TestCase):
         }
         instance = jsonrpc.NefRequest(self.proxy, method)
         result = instance.getpath(content, rel)
-        expected = None
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_getpath_no_href(self):
         method = 'get'
@@ -796,8 +790,7 @@ class TestNefRequest(test.TestCase):
         }
         instance = jsonrpc.NefRequest(self.proxy, method)
         result = instance.getpath(content, rel)
-        expected = None
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
 
 class TestNefCollections(test.TestCase):
@@ -832,7 +825,7 @@ class TestNefCollections(test.TestCase):
         self.proxy.put.return_value = expected
         result = self.instance.set(name, payload)
         self.proxy.put.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_list(self):
         payload = {'key': 'value'}
@@ -848,15 +841,14 @@ class TestNefCollections(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.create(payload)
         self.proxy.post.assert_called_with(self.instance.root, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_create_exist(self):
         payload = {'key': 'value'}
-        expected = None
         self.proxy.post.side_effect = jsonrpc.NefException(code='EEXIST')
         result = self.instance.create(payload)
         self.proxy.post.assert_called_with(self.instance.root, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_create_error(self):
         payload = {'key': 'value'}
@@ -872,17 +864,16 @@ class TestNefCollections(test.TestCase):
         self.proxy.delete.return_value = expected
         result = self.instance.delete(name, payload)
         self.proxy.delete.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_delete_not_found(self):
         name = 'parent/child'
         payload = {'key': 'value'}
-        expected = None
         path = self.instance.path(name)
         self.proxy.delete.side_effect = jsonrpc.NefException(code='ENOENT')
         result = self.instance.delete(name, payload)
         self.proxy.delete.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_delete_error(self):
         name = 'parent/child'
@@ -931,7 +922,7 @@ class TestNefDatasets(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.rename(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
 
 class TestNefSnapshots(test.TestCase):
@@ -950,7 +941,7 @@ class TestNefSnapshots(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.clone(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
 
 class TestNefFilesystems(test.TestCase):
@@ -969,7 +960,7 @@ class TestNefFilesystems(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.mount(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_unmount(self):
         name = 'parent/child'
@@ -980,7 +971,7 @@ class TestNefFilesystems(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.unmount(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_acl(self):
         name = 'parent/child'
@@ -991,7 +982,29 @@ class TestNefFilesystems(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.acl(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
+
+    def test_promote(self):
+        name = 'parent/child'
+        payload = {'key': 'value'}
+        expected = None
+        path = self.instance.path(name)
+        path = posixpath.join(path, 'promote')
+        self.proxy.post.return_value = expected
+        result = self.instance.promote(name, payload)
+        self.proxy.post.assert_called_with(path, payload)
+        self.assertIsNone(result)
+
+    def test_rollback(self):
+        name = 'parent/child'
+        payload = {'key': 'value'}
+        expected = None
+        path = self.instance.path(name)
+        path = posixpath.join(path, 'rollback')
+        self.proxy.post.return_value = expected
+        result = self.instance.rollback(name, payload)
+        self.proxy.post.assert_called_with(path, payload)
+        self.assertIsNone(result)
 
 
 class TestNefHpr(test.TestCase):
@@ -1008,7 +1021,7 @@ class TestNefHpr(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.activate(payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
     def test_start(self):
         name = 'parent/child'
@@ -1018,7 +1031,7 @@ class TestNefHpr(test.TestCase):
         self.proxy.post.return_value = expected
         result = self.instance.start(name, payload)
         self.proxy.post.assert_called_with(path, payload)
-        self.assertEqual(expected, result)
+        self.assertIsNone(result)
 
 
 class TestNefProxy(test.TestCase):
@@ -1030,7 +1043,7 @@ class TestNefProxy(test.TestCase):
         self.cfg.nexenta_ssl_cert_verify = True
         self.cfg.nexenta_user = 'user'
         self.cfg.nexenta_password = 'pass'
-        self.cfg.nexenta_rest_address = '1.1.1.1,2.2.2.2'
+        self.cfg.nexenta_rest_addresses = ['1.1.1.1', '2.2.2.2']
         self.cfg.nexenta_rest_port = 8443
         self.cfg.nexenta_rest_backoff_factor = 1
         self.cfg.nexenta_rest_retry_count = 3
@@ -1078,14 +1091,14 @@ class TestNefProxy(test.TestCase):
     def test___init___nfs_no_rest_address(self):
         proto = 'nfs'
         cfg = copy.copy(self.cfg)
-        cfg.nexenta_rest_address = ''
+        cfg.nexenta_rest_addresses = ''
         result = jsonrpc.NefProxy(proto, cfg.nexenta_folder, cfg)
         self.assertIsInstance(result, jsonrpc.NefProxy)
 
     def test___init___iscsi_no_rest_address(self):
         proto = 'iscsi'
         cfg = copy.copy(self.cfg)
-        cfg.nexenta_rest_address = ''
+        cfg.nexenta_rest_addresses = ''
         cfg.nexenta_host = '4.4.4.4'
         result = jsonrpc.NefProxy(proto, cfg.nexenta_folder, cfg)
         self.assertIsInstance(result, jsonrpc.NefProxy)
@@ -1125,7 +1138,7 @@ class TestNefProxy(test.TestCase):
     def test_update_host(self):
         token = 'token'
         bearer = 'Bearer %s' % token
-        host = self.cfg.nexenta_rest_address
+        host = self.cfg.nexenta_rest_addresses[0]
         self.proxy.tokens[host] = token
         self.assertIsNone(self.proxy.update_host(host))
         self.assertEqual(self.proxy.session.headers['Authorization'], bearer)
