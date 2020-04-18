@@ -16,7 +16,7 @@
 from oslo_log import log
 
 from manila import exception
-from manila.i18n import _, _LI
+from manila.i18n import _
 from manila.share import driver
 from manila.share.drivers.nexenta.ns4 import nexenta_nfs_helper
 from manila.share.drivers.nexenta import options
@@ -77,7 +77,7 @@ class NexentaNasDriver(driver.ShareDriver):
         return self.helper.create_filesystem(share)
 
     def create_share_from_snapshot(self, context, share, snapshot,
-                                   share_server=None):
+                                   share_server=None, parent_share=None):
         """Is called to create share from snapshot."""
         LOG.debug('Creating share from snapshot %s.', snapshot['name'])
         return self.helper.create_share_from_snapshot(share, snapshot)
@@ -98,7 +98,7 @@ class NexentaNasDriver(driver.ShareDriver):
         LOG.debug('Creating a snapshot of share %s.', snapshot['share_name'])
         snap_id = self.helper.create_snapshot(
             snapshot['share_name'], snapshot['name'])
-        LOG.info(_LI('Created snapshot %s.'), snap_id)
+        LOG.info('Created snapshot %s.', snap_id)
 
     def delete_snapshot(self, context, snapshot, share_server=None):
         """Delete a snapshot."""

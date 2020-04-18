@@ -18,7 +18,7 @@ from oslo_utils import excutils
 
 from manila.common import constants as common
 from manila import exception
-from manila.i18n import _, _LI
+from manila.i18n import _
 from manila.share.drivers.nexenta.ns4 import jsonrpc
 from manila.share.drivers.nexenta import utils
 
@@ -35,6 +35,7 @@ class NFSHelper(object):
             self.configuration.nexenta_mount_point_base)
         self.dataset_compression = (
             self.configuration.nexenta_dataset_compression)
+        self.dataset_dedupe = self.configuration.nexenta_dataset_dedupe
         self.nms = None
         self.nms_protocol = self.configuration.nexenta_rest_protocol
         self.nms_host = self.configuration.nexenta_host
@@ -111,8 +112,8 @@ class NFSHelper(object):
         except exception.NexentaException as e:
             with excutils.save_and_reraise_exception() as exc:
                 if NOT_EXIST in e.args[0]:
-                    LOG.info(_LI('Folder %s does not exist, it was '
-                                 'already deleted.'), folder)
+                    LOG.info('Folder %s does not exist, it was '
+                             'already deleted.', folder)
                     exc.reraise = False
 
     def _get_share_path(self, share_name):
@@ -136,20 +137,20 @@ class NFSHelper(object):
         except exception.NexentaException as e:
             with excutils.save_and_reraise_exception() as exc:
                 if NOT_EXIST in e.args[0]:
-                    LOG.info(_LI('Snapshot %(folder)s@%(snapshot)s does not '
-                                 'exist, it was already deleted.'),
+                    LOG.info('Snapshot %(folder)s@%(snapshot)s does not '
+                             'exist, it was already deleted.',
                              {
                                  'folder': share_name,
                                  'snapshot': snapshot_name,
-                    })
+                             })
                     exc.reraise = False
                 elif DEP_CLONES in e.args[0]:
-                    LOG.info(_LI(
+                    LOG.info(
                         'Snapshot %(folder)s@%(snapshot)s has dependent '
-                        'clones, it will be deleted later.'), {
+                        'clones, it will be deleted later.', {
                             'folder': share_name,
                             'snapshot': snapshot_name
-                    })
+                            })
                     exc.reraise = False
 
     def create_share_from_snapshot(self, share, snapshot):
@@ -204,6 +205,7 @@ class NFSHelper(object):
         """
         total, free, allocated = self._get_capacity_info()
         compression = not self.dataset_compression == 'off'
+        dedupe = not self.dataset_dedupe == 'off'
         return {
             'vendor_name': 'Nexenta',
             'storage_protocol': self.storage_protocol,
@@ -215,6 +217,7 @@ class NFSHelper(object):
                 'reserved_percentage':
                     self.configuration.reserved_share_percentage,
                 'compression': compression,
+                'dedupe': dedupe,
                 'max_over_subscription_ratio': (
                     self.configuration.safe_get(
                         'max_over_subscription_ratio')),
