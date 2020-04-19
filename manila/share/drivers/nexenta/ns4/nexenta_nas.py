@@ -1,5 +1,4 @@
-# Copyright 2016 Nexenta Systems, Inc.
-# All Rights Reserved.
+# Copyright 2020 Nexenta by DDN, Inc. All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -77,7 +76,7 @@ class NexentaNasDriver(driver.ShareDriver):
         return self.helper.create_filesystem(share)
 
     def create_share_from_snapshot(self, context, share, snapshot,
-                                   share_server=None):
+                                   share_server=None, parent_share=None):
         """Is called to create share from snapshot."""
         LOG.debug('Creating share from snapshot %s.', snapshot['name'])
         return self.helper.create_share_from_snapshot(share, snapshot)
