@@ -18,7 +18,7 @@ from oslo_utils import excutils
 
 from manila.common import constants as common
 from manila import exception
-from manila.i18n import _, _LI
+from manila.i18n import _
 from manila.share.drivers.nexenta.ns4 import jsonrpc
 from manila.share.drivers.nexenta import utils
 
@@ -111,8 +111,8 @@ class NFSHelper(object):
         except exception.NexentaException as e:
             with excutils.save_and_reraise_exception() as exc:
                 if NOT_EXIST in e.args[0]:
-                    LOG.info(_LI('Folder %s does not exist, it was '
-                                 'already deleted.'), folder)
+                    LOG.info('Folder %s does not exist, it was '
+                             'already deleted.', folder)
                     exc.reraise = False
 
     def _get_share_path(self, share_name):
@@ -136,20 +136,14 @@ class NFSHelper(object):
         except exception.NexentaException as e:
             with excutils.save_and_reraise_exception() as exc:
                 if NOT_EXIST in e.args[0]:
-                    LOG.info(_LI('Snapshot %(folder)s@%(snapshot)s does not '
-                                 'exist, it was already deleted.'),
-                             {
-                                 'folder': share_name,
-                                 'snapshot': snapshot_name,
-                    })
+                    LOG.info('Snapshot %(folder)s@%(snapshot)s does not '
+                             'exist, it was already deleted.',
+                             {'folder': share_name, 'snapshot': snapshot_name})
                     exc.reraise = False
                 elif DEP_CLONES in e.args[0]:
-                    LOG.info(_LI(
-                        'Snapshot %(folder)s@%(snapshot)s has dependent '
-                        'clones, it will be deleted later.'), {
-                            'folder': share_name,
-                            'snapshot': snapshot_name
-                    })
+                    LOG.info('Snapshot %(folder)s@%(snapshot)s has dependent '
+                             'clones, it will be deleted later.',
+                             {'folder': share_name, 'snapshot': snapshot_name})
                     exc.reraise = False
 
     def create_share_from_snapshot(self, share, snapshot):
