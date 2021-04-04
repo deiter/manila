@@ -1,5 +1,4 @@
-# Copyright 2019 Nexenta by DDN, Inc.
-# All Rights Reserved.
+# Copyright 2021 Nexenta by DDN, Inc. All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -22,13 +21,13 @@ from oslo_log import log as logging
 import requests
 import six
 
-from manila import exception
+from manila.exception import ManilaException
 from manila.i18n import _
 
 LOG = logging.getLogger(__name__)
 
 
-class NefException(exception.ManilaException):
+class NefException(ManilaException):
     def __init__(self, data=None, **kwargs):
         defaults = {
             'name': 'NexentaError',
@@ -178,7 +177,6 @@ class NefRequest(object):
             raise NefException(code='ENOMSG', message=message)
 
         method = 'get'
-        # pylint: disable=no-member
         if response.status_code == requests.codes.unauthorized:
             if self.stat[response.status_code] > self.proxy.retries:
                 raise NefException(content)
@@ -294,7 +292,6 @@ class NefRequest(object):
             LOG.debug('Failover result: %(code)s %(content)s',
                       {'code': response.status_code,
                        'content': response.content})
-            # pylint: disable=no-member
             if response.status_code == requests.codes.ok:
                 LOG.debug('Successful failover path '
                           '%(root)s to host %(host)s',
@@ -494,8 +491,8 @@ class NefProxy(object):
         self.username = conf.nexenta_user
         self.password = conf.nexenta_password
         self.hosts = []
-        if conf.nexenta_rest_addresses:
-            for host in conf.nexenta_rest_addresses:
+        if conf.nexenta_rest_address:
+            for host in conf.nexenta_rest_address.split(','):
                 self.hosts.append(host.strip())
         self.root = self.filesystems.path(path)
         if not self.hosts:
@@ -512,7 +509,6 @@ class NefProxy(object):
         self.retries = len(self.hosts) * conf.nexenta_rest_retry_count
         self.timeout = (
             conf.nexenta_rest_connect_timeout, conf.nexenta_rest_read_timeout)
-        # pylint: disable=no-member
         max_retries = requests.packages.urllib3.util.retry.Retry(
             total=conf.nexenta_rest_retry_count,
             backoff_factor=conf.nexenta_rest_backoff_factor)
